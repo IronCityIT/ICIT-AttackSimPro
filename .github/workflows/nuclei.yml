@@ -1,0 +1,109 @@
+name: AttackSimPro - Nuclei Scan
+
+on:
+  schedule:
+    - cron: "30 3 * * 3" # Wednesdays 03:30 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nuclei:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Validate targets list
+        run: |
+          set -euo pipefail
+          test -f manifests/targets.txt
+          sed -i '/^\s*$/d' manifests/targets.txt
+          echo "Targets:"
+          cat manifests/targets.txt
+
+      - name: Install nuclei
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y curl unzip
+          curl -s https://api.github.com/repos/projectdiscovery/nuclei/releases/latest | \
+            grep browser_download_url | grep linux_amd64.zip | cut -d '"' -f 4 | \
+            xargs -I{} curl -L -o nuclei.zip {}
+          unzip -o nuclei.zip
+          sudo mv nuclei /usr/local/bin/nuclei
+          nuclei -version
+
+      - name: Update templates
+        run: |
+          set -euo pipefail
+          nuclei -update-templates
+
+      - name: Run nuclei
+        run: |
+          set -euo pipefail
+          TS="$(date -u +'%Y-%m-%dT%H-%M-%SZ')"
+          mkdir -p out/nuclei
+          nuclei \
+            -l manifests/targets.txt \
+            -severity medium,high,critical \
+            -jsonl \
+            -o "out/nuclei/nuclei_${TS}.jsonl"
+
+      - name: Build nuclei summary + manifest
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y jq
+          TS="$(date -u +'%Y-%m-%dT%H-%M-%SZ')"
+
+          python3 - << 'PY'
+          import json, glob
+          files = sorted(glob.glob("out/nuclei/nuclei_*.jsonl"))
+          if not files:
+            raise SystemExit("No nuclei output found.")
+          path = files[-1]
+          counts = {"critical":0,"high":0,"medium":0,"low":0,"info":0,"unknown":0}
+          total = 0
+          with open(path,"r",encoding="utf-8") as f:
+            for line in f:
+              line=line.strip()
+              if not line:
+                continue
+              total += 1
+              try:
+                obj=json.loads(line)
+                sev=str(obj.get("info",{}).get("severity","unknown")).lower()
+              except Exception:
+                sev="unknown"
+              counts[sev] = counts.get(sev,0)+1
+          out={"total_findings": total, "by_severity": counts}
+          with open("out/nuclei/summary.json","w",encoding="utf-8") as w:
+            json.dump(out,w,indent=2)
+          PY
+
+          jq -n \
+            --arg ts "$TS" \
+            --arg job "Nuclei Scan" \
+            --arg sev "medium,high,critical" \
+            --arg targets "$(paste -sd "," manifests/targets.txt)" \
+            '{
+              product: "ICIT AttackSimPro",
+              job: $job,
+              timestamp_utc: $ts,
+              severities: $sev,
+              targets_csv: $targets
+            }' > out/nuclei/manifest.json
+
+      - name: Package evidence
+        run: |
+          set -euo pipefail
+          TS="$(date -u +'%Y-%m-%dT%H-%M-%SZ')"
+          zip -r "attacksimpro_nuclei_${TS}.zip" out/nuclei manifests/targets.txt
+
+      - name: Upload evidence artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: attacksimpro-nuclei
+          path: attacksimpro_nuclei_*.zip
