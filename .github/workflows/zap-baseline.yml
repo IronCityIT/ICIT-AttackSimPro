@@ -1,0 +1,51 @@
+name: AttackSimPro - ZAP Baseline (Passive)
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"   # Mondays 03:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  zap_baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run ZAP Baseline - Target 1
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: ${{ vars.SCAN_TARGET_1 }}
+          cmd_options: "-a -J zap_target1.json -r zap_target1.html"
+
+      - name: Run ZAP Baseline - Target 2
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: ${{ vars.SCAN_TARGET_2 }}
+          cmd_options: "-a -J zap_target2.json -r zap_target2.html"
+
+      - name: Package Evidence
+        run: |
+          set -euo pipefail
+          TS="$(date -u +'%Y-%m-%dT%H-%M-%SZ')"
+          mkdir -p evidence
+          mv zap_target1.json zap_target1.html evidence/
+          mv zap_target2.json zap_target2.html evidence/
+          cat > evidence/manifest.json << EOF
+          {
+            "product": "ICIT AttackSimPro",
+            "job": "ZAP Baseline (Passive)",
+            "timestamp_utc": "${TS}",
+            "targets": [
+              "${{ vars.SCAN_TARGET_1 }}",
+              "${{ vars.SCAN_TARGET_2 }}"
+            ]
+          }
+          EOF
+          zip -r "attacksimpro_zap_${TS}.zip" evidence
+
+      - name: Upload Artifact to GitHub
+        uses: actions/upload-artifact@v4
+        with:
+          name: attacksimpro-zap-evidence
+          path: attacksimpro_zap_*.zip
