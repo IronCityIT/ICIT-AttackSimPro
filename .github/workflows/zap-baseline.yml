@@ -2,7 +2,7 @@ name: AttackSimPro - ZAP Baseline (Passive)
 
 on:
   schedule:
-    - cron: "0 3 * * 1"   # Mondays 03:00 UTC
+    - cron: "0 3 * * 1" # Mondays 03:00 UTC
   workflow_dispatch:
 
 permissions:
@@ -12,40 +12,65 @@ jobs:
   zap_baseline:
     runs-on: ubuntu-latest
     steps:
-      - name: Run ZAP Baseline - Target 1
-        uses: zaproxy/action-baseline@v0.12.0
-        with:
-          target: ${{ vars.SCAN_TARGET_1 }}
-          cmd_options: "-a -J zap_target1.json -r zap_target1.html"
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-      - name: Run ZAP Baseline - Target 2
-        uses: zaproxy/action-baseline@v0.12.0
-        with:
-          target: ${{ vars.SCAN_TARGET_2 }}
-          cmd_options: "-a -J zap_target2.json -r zap_target2.html"
+      - name: Validate targets list
+        run: |
+          set -euo pipefail
+          test -f manifests/targets.txt
+          sed -i '/^\s*$/d' manifests/targets.txt
+          echo "Targets:"
+          cat manifests/targets.txt
 
-      - name: Package Evidence
+      - name: Run ZAP Baseline (per target)
         run: |
           set -euo pipefail
           TS="$(date -u +'%Y-%m-%dT%H-%M-%SZ')"
-          mkdir -p evidence
-          mv zap_target1.json zap_target1.html evidence/
-          mv zap_target2.json zap_target2.html evidence/
-          cat > evidence/manifest.json << EOF
-          {
-            "product": "ICIT AttackSimPro",
-            "job": "ZAP Baseline (Passive)",
-            "timestamp_utc": "${TS}",
-            "targets": [
-              "${{ vars.SCAN_TARGET_1 }}",
-              "${{ vars.SCAN_TARGET_2 }}"
-            ]
-          }
-          EOF
-          zip -r "attacksimpro_zap_${TS}.zip" evidence
+          mkdir -p out/zap
 
-      - name: Upload Artifact to GitHub
+          i=0
+          while IFS= read -r url; do
+            url="$(echo "$url" | xargs)"
+            [ -z "$url" ] && continue
+            i=$((i+1))
+
+            echo "ZAP baseline scanning: $url"
+            docker run --rm -t ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
+              -t "$url" \
+              -a \
+              -J "zap_target${i}_${TS}.json" \
+              -r "zap_target${i}_${TS}.html"
+
+            mv "zap_target${i}_${TS}.json" "out/zap/"
+            mv "zap_target${i}_${TS}.html" "out/zap/"
+          done < manifests/targets.txt
+
+      - name: Write manifest
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y jq
+          TS="$(date -u +'%Y-%m-%dT%H-%M-%SZ')"
+          jq -n \
+            --arg ts "$TS" \
+            --arg job "ZAP Baseline (Passive)" \
+            --arg targets "$(paste -sd "," manifests/targets.txt)" \
+            '{
+              product: "ICIT AttackSimPro",
+              job: $job,
+              timestamp_utc: $ts,
+              targets_csv: $targets
+            }' > out/zap/manifest.json
+
+      - name: Package evidence
+        run: |
+          set -euo pipefail
+          TS="$(date -u +'%Y-%m-%dT%H-%M-%SZ')"
+          zip -r "attacksimpro_zap_${TS}.zip" out/zap manifests/targets.txt
+
+      - name: Upload evidence artifact
         uses: actions/upload-artifact@v4
         with:
-          name: attacksimpro-zap-evidence
+          name: attacksimpro-zap
           path: attacksimpro_zap_*.zip
