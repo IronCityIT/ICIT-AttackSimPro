@@ -1,0 +1,99 @@
+name: AttackSimPro - TLS & Headers Evidence
+
+on:
+  schedule:
+    - cron: "15 2 * * *" # Daily 02:15 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tls_headers:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Validate targets list
+        run: |
+          set -euo pipefail
+          test -f manifests/targets.txt
+          sed -i '/^\s*$/d' manifests/targets.txt
+          echo "Targets:"
+          cat manifests/targets.txt
+
+      - name: Collect TLS and headers
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y jq openssl curl
+          TS="$(date -u +'%Y-%m-%dT%H-%M-%SZ')"
+          mkdir -p out/tls-headers
+
+          while IFS= read -r url; do
+            url="$(echo "$url" | xargs)"
+            [ -z "$url" ] && continue
+
+            host="$(echo "$url" | sed -E 's#https?://##' | cut -d/ -f1)"
+            safe_host="$(echo "$host" | tr ':' '_' )"
+
+            CERT_DATES="$(echo | openssl s_client -servername "$host" -connect "$host:443" 2>/dev/null | openssl x509 -noout -dates || true)"
+            NOT_BEFORE="$(echo "$CERT_DATES" | grep -i notBefore | cut -d= -f2- | sed 's/^[[:space:]]*//')"
+            NOT_AFTER="$(echo "$CERT_DATES" | grep -i notAfter  | cut -d= -f2- | sed 's/^[[:space:]]*//')"
+
+            HDRS="out/tls-headers/headers_${safe_host}_${TS}.txt"
+            curl -sS -D "$HDRS" -o /dev/null "$url" || true
+
+            get_hdr () { grep -i "^$1:" "$HDRS" | head -n 1 | sed -E "s/^$1:[[:space:]]*//I" || true; }
+
+            jq -n \
+              --arg ts "$TS" \
+              --arg url "$url" \
+              --arg host "$host" \
+              --arg not_before "$NOT_BEFORE" \
+              --arg not_after "$NOT_AFTER" \
+              --arg hsts "$(get_hdr 'Strict-Transport-Security')" \
+              --arg csp "$(get_hdr 'Content-Security-Policy')" \
+              --arg xfo "$(get_hdr 'X-Frame-Options')" \
+              --arg xcto "$(get_hdr 'X-Content-Type-Options')" \
+              --arg rp "$(get_hdr 'Referrer-Policy')" \
+              --arg pp "$(get_hdr 'Permissions-Policy')" \
+              '{
+                timestamp_utc: $ts,
+                url: $url,
+                host: $host,
+                tls: { not_before: $not_before, not_after: $not_after },
+                headers: {
+                  strict_transport_security: $hsts,
+                  content_security_policy: $csp,
+                  x_frame_options: $xfo,
+                  x_content_type_options: $xcto,
+                  referrer_policy: $rp,
+                  permissions_policy: $pp
+                }
+              }' > "out/tls-headers/evidence_${safe_host}_${TS}.json"
+          done < manifests/targets.txt
+
+          jq -n \
+            --arg ts "$TS" \
+            --arg job "TLS & Headers Evidence" \
+            --arg targets "$(paste -sd "," manifests/targets.txt)" \
+            '{
+              product: "ICIT AttackSimPro",
+              job: $job,
+              timestamp_utc: $ts,
+              targets_csv: $targets
+            }' > out/tls-headers/manifest.json
+
+      - name: Package evidence
+        run: |
+          set -euo pipefail
+          TS="$(date -u +'%Y-%m-%dT%H-%M-%SZ')"
+          zip -r "attacksimpro_tls_headers_${TS}.zip" out/tls-headers manifests/targets.txt
+
+      - name: Upload evidence artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: attacksimpro-tls-headers
+          path: attacksimpro_tls_headers_*.zip
