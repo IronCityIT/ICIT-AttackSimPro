@@ -10,11 +10,13 @@ permissions:
 
 jobs:
   tls_headers:
+    name: 🟣 TLS & Security Headers Check
     runs-on: ubuntu-latest
+    
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-
+      
       - name: Validate targets list
         run: |
           set -euo pipefail
@@ -22,7 +24,15 @@ jobs:
           sed -i '/^\s*$/d' manifests/targets.txt
           echo "Targets:"
           cat manifests/targets.txt
-
+      
+      - name: 🟣 Purple Team - Scan Starting
+        run: |
+          echo "════════════════════════════════════════"
+          echo "🟣 AttackSimPro - TLS & Headers Check"
+          echo "════════════════════════════════════════"
+          echo "Targets: $(wc -l < manifests/targets.txt)"
+          echo "Time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+      
       - name: Collect TLS and headers
         run: |
           set -euo pipefail
@@ -30,24 +40,30 @@ jobs:
           sudo apt-get install -y jq openssl curl
           TS="$(date -u +'%Y-%m-%dT%H-%M-%SZ')"
           mkdir -p out/tls-headers
-
+          
+          # Array to collect all evidence
+          echo "[]" > out/tls-headers/all-evidence.json
+          
           while IFS= read -r url; do
             url="$(echo "$url" | xargs)"
             [ -z "$url" ] && continue
-
+            
             host="$(echo "$url" | sed -E 's#https?://##' | cut -d/ -f1)"
             safe_host="$(echo "$host" | tr ':' '_' )"
-
+            
+            # Get TLS cert info
             CERT_DATES="$(echo | openssl s_client -servername "$host" -connect "$host:443" 2>/dev/null | openssl x509 -noout -dates || true)"
             NOT_BEFORE="$(echo "$CERT_DATES" | grep -i notBefore | cut -d= -f2- | sed 's/^[[:space:]]*//')"
             NOT_AFTER="$(echo "$CERT_DATES" | grep -i notAfter  | cut -d= -f2- | sed 's/^[[:space:]]*//')"
-
+            
+            # Get HTTP headers
             HDRS="out/tls-headers/headers_${safe_host}_${TS}.txt"
             curl -sS -D "$HDRS" -o /dev/null "$url" || true
-
+            
             get_hdr () { grep -i "^$1:" "$HDRS" | head -n 1 | sed -E "s/^$1:[[:space:]]*//I" || true; }
-
-            jq -n \
+            
+            # Create evidence JSON
+            EVIDENCE=$(jq -n \
               --arg ts "$TS" \
               --arg url "$url" \
               --arg host "$host" \
@@ -72,9 +88,18 @@ jobs:
                   referrer_policy: $rp,
                   permissions_policy: $pp
                 }
-              }' > "out/tls-headers/evidence_${safe_host}_${TS}.json"
+              }')
+            
+            # Save individual evidence
+            echo "$EVIDENCE" > "out/tls-headers/evidence_${safe_host}_${TS}.json"
+            
+            # Append to all-evidence array
+            jq --argjson item "$EVIDENCE" '. += [$item]' out/tls-headers/all-evidence.json > out/tls-headers/all-evidence.tmp.json
+            mv out/tls-headers/all-evidence.tmp.json out/tls-headers/all-evidence.json
+            
           done < manifests/targets.txt
-
+          
+          # Create manifest
           jq -n \
             --arg ts "$TS" \
             --arg job "TLS & Headers Evidence" \
@@ -85,15 +110,55 @@ jobs:
               timestamp_utc: $ts,
               targets_csv: $targets
             }' > out/tls-headers/manifest.json
-
+          
+          # Create Cloud Function payload
+          jq -n \
+            --arg ts "$TS" \
+            --argjson evidence "$(cat out/tls-headers/all-evidence.json)" \
+            '{
+              scan_type: "tls_headers",
+              timestamp: $ts,
+              evidence: $evidence
+            }' > out/tls-headers/cloud-payload.json
+      
+      - name: 🚀 Upload to AttackSimPro Dashboard
+        if: always()
+        run: |
+          if [ -f "out/tls-headers/cloud-payload.json" ]; then
+            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+              -H "Content-Type: application/json" \
+              -d @out/tls-headers/cloud-payload.json \
+              "https://storescanresults-wrl6y3keaa-ul.a.run.app")
+            
+            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+            BODY=$(echo "$RESPONSE" | sed '$d')
+            
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Results uploaded to AttackSimPro Dashboard"
+              echo "$BODY" | jq '.' || echo "$BODY"
+            else
+              echo "⚠️  Upload failed (HTTP $HTTP_CODE)"
+              echo "$BODY"
+            fi
+          fi
+      
       - name: Package evidence
         run: |
-          set -euo pipefail
           TS="$(date -u +'%Y-%m-%dT%H-%M-%SZ')"
           zip -r "attacksimpro_tls_headers_${TS}.zip" out/tls-headers manifests/targets.txt
-
+      
       - name: Upload evidence artifact
         uses: actions/upload-artifact@v4
         with:
           name: attacksimpro-tls-headers
           path: attacksimpro_tls_headers_*.zip
+      
+      - name: 🟣 Scan Complete
+        if: always()
+        run: |
+          TARGETS=$(jq 'length' out/tls-headers/all-evidence.json || echo "0")
+          echo "════════════════════════════════════════"
+          echo "✅ TLS & Headers Check Complete"
+          echo "Targets Scanned: $TARGETS"
+          echo "Dashboard: https://ironcity-attacksimpro.web.app"
+          echo "════════════════════════════════════════"
