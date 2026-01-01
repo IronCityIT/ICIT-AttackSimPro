@@ -1,0 +1,225 @@
+name: AttackSimPro - ZAP API Scan
+
+# ============================================================
+# API SCAN - Scan REST/GraphQL APIs using OpenAPI/Swagger specs
+# Designed for API-first applications
+# Triggered via CLI only - no manual runs without parameters
+# ============================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'Base URL of the API (e.g., https://api.example.com)'
+        required: true
+      api_spec_url:
+        description: 'URL to OpenAPI/Swagger spec (e.g., https://api.example.com/swagger.json)'
+        required: true
+      scan_id:
+        description: 'Unique scan identifier from CLI'
+        required: true
+      client_id:
+        description: 'Client identifier for reporting'
+        required: false
+        default: 'internal'
+      api_format:
+        description: 'API spec format: openapi, soap, or graphql'
+        required: false
+        default: 'openapi'
+
+# Only allow one API scan at a time per client
+concurrency:
+  group: zap-api-${{ github.event.inputs.client_id }}
+  cancel-in-progress: false
+
+jobs:
+  api_scan:
+    name: ZAP API Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate inputs
+        run: |
+          if [ -z "${{ github.event.inputs.target_url }}" ]; then
+            echo "❌ ERROR: target_url is required"
+            exit 1
+          fi
+          if [ -z "${{ github.event.inputs.api_spec_url }}" ]; then
+            echo "❌ ERROR: api_spec_url is required"
+            exit 1
+          fi
+          if [ -z "${{ github.event.inputs.scan_id }}" ]; then
+            echo "❌ ERROR: scan_id is required"
+            exit 1
+          fi
+          
+          # Validate URLs
+          TARGET="${{ github.event.inputs.target_url }}"
+          SPEC="${{ github.event.inputs.api_spec_url }}"
+          
+          if [[ ! "$TARGET" =~ ^https?:// ]]; then
+            echo "❌ ERROR: target_url must start with http:// or https://"
+            exit 1
+          fi
+          
+          if [[ ! "$SPEC" =~ ^https?:// ]]; then
+            echo "❌ ERROR: api_spec_url must start with http:// or https://"
+            exit 1
+          fi
+          
+          echo "✅ Inputs validated"
+          echo "   Target: $TARGET"
+          echo "   API Spec: $SPEC"
+          echo "   Format: ${{ github.event.inputs.api_format }}"
+          echo "   Scan ID: ${{ github.event.inputs.scan_id }}"
+          echo "   Client: ${{ github.event.inputs.client_id }}"
+
+      - name: Create working directories
+        run: |
+          mkdir -p zap-reports
+          chmod 777 zap-reports
+
+      - name: Purple Team Notification - API Scan Starting
+        run: |
+          echo "🔵 =============================================="
+          echo "🔵 API SECURITY SCAN STARTING"
+          echo "🔵 =============================================="
+          echo ""
+          echo "📋 Scan Details:"
+          echo "   Type: ZAP API Scan"
+          echo "   Target API: ${{ github.event.inputs.target_url }}"
+          echo "   API Spec: ${{ github.event.inputs.api_spec_url }}"
+          echo "   Format: ${{ github.event.inputs.api_format }}"
+          echo "   Scan ID: ${{ github.event.inputs.scan_id }}"
+          echo "   Client: ${{ github.event.inputs.client_id }}"
+          echo "   Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo ""
+          echo "📊 This scan will test all API endpoints defined in the spec."
+          echo ""
+
+      - name: Pull ZAP Docker Image
+        run: |
+          echo "Pulling OWASP ZAP Docker image..."
+          for i in {1..3}; do
+            docker pull ghcr.io/zaproxy/zaproxy:stable && break
+            echo "Retry $i..."
+            sleep 10
+          done
+
+      - name: Fetch and validate API spec
+        run: |
+          echo "Fetching API specification..."
+          curl -s "${{ github.event.inputs.api_spec_url }}" -o zap-reports/api-spec.json
+          
+          if [ -f "zap-reports/api-spec.json" ]; then
+            echo "✅ API spec fetched successfully"
+            echo "Spec preview:"
+            head -20 zap-reports/api-spec.json
+          else
+            echo "❌ Failed to fetch API spec"
+            exit 1
+          fi
+
+      - name: Run ZAP API Scan
+        id: zap_scan
+        run: |
+          echo "Starting ZAP API Scan against ${{ github.event.inputs.target_url }}"
+          
+          # Determine format flag
+          FORMAT_FLAG=""
+          case "${{ github.event.inputs.api_format }}" in
+            "openapi")
+              FORMAT_FLAG="-f openapi"
+              ;;
+            "soap")
+              FORMAT_FLAG="-f soap"
+              ;;
+            "graphql")
+              FORMAT_FLAG="-f graphql"
+              ;;
+          esac
+          
+          docker run -v $(pwd)/zap-reports:/zap/wrk/:rw \
+            -t ghcr.io/zaproxy/zaproxy:stable \
+            zap-api-scan.py \
+            -t ${{ github.event.inputs.api_spec_url }} \
+            $FORMAT_FLAG \
+            -r zap-api-${{ github.event.inputs.scan_id }}.html \
+            -J zap-api-${{ github.event.inputs.scan_id }}.json \
+            -I || true
+
+      - name: Verify reports generated
+        run: |
+          echo "Checking for generated reports..."
+          ls -lh zap-reports/
+          
+          if [ -f "zap-reports/zap-api-${{ github.event.inputs.scan_id }}.html" ]; then
+            echo "✅ HTML report generated successfully"
+          else
+            echo "❌ HTML report not found"
+            exit 1
+          fi
+
+      - name: Parse scan results
+        id: parse
+        run: |
+          JSON_FILE="zap-reports/zap-api-${{ github.event.inputs.scan_id }}.json"
+          
+          if [ -f "$JSON_FILE" ]; then
+            HIGH=$(jq '[.site[].alerts[] | select(.riskdesc | startswith("High"))] | length' "$JSON_FILE" 2>/dev/null || echo "0")
+            MEDIUM=$(jq '[.site[].alerts[] | select(.riskdesc | startswith("Medium"))] | length' "$JSON_FILE" 2>/dev/null || echo "0")
+            LOW=$(jq '[.site[].alerts[] | select(.riskdesc | startswith("Low"))] | length' "$JSON_FILE" 2>/dev/null || echo "0")
+            INFO=$(jq '[.site[].alerts[] | select(.riskdesc | startswith("Informational"))] | length' "$JSON_FILE" 2>/dev/null || echo "0")
+            
+            echo "high=$HIGH" >> $GITHUB_OUTPUT
+            echo "medium=$MEDIUM" >> $GITHUB_OUTPUT
+            echo "low=$LOW" >> $GITHUB_OUTPUT
+            echo "info=$INFO" >> $GITHUB_OUTPUT
+            
+            echo ""
+            echo "🔵 =============================================="
+            echo "🔵 API SCAN RESULTS SUMMARY"
+            echo "🔵 =============================================="
+            echo "  🔴 High Risk:    $HIGH"
+            echo "  🟠 Medium Risk:  $MEDIUM"
+            echo "  🟡 Low Risk:     $LOW"
+            echo "  ℹ️  Informational: $INFO"
+            echo ""
+            
+            # Common API vulnerabilities to highlight
+            echo "📋 API-Specific Findings:"
+            jq -r '.site[].alerts[] | select(.name | test("injection|auth|token|cors|header"; "i")) | "  - [\(.riskdesc | split(" ")[0])] \(.name)"' "$JSON_FILE" 2>/dev/null | head -10 || echo "  No API-specific findings"
+          else
+            echo "⚠️ Could not parse JSON results"
+            echo "high=0" >> $GITHUB_OUTPUT
+            echo "medium=0" >> $GITHUB_OUTPUT
+            echo "low=0" >> $GITHUB_OUTPUT
+            echo "info=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload scan artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-api-${{ github.event.inputs.scan_id }}
+          path: zap-reports/
+          retention-days: 90
+
+      - name: Purple Team Notification - API Scan Complete
+        run: |
+          echo ""
+          echo "🔵 =============================================="
+          echo "🔵 API SCAN COMPLETE"
+          echo "🔵 =============================================="
+          echo ""
+          echo "📋 Summary:"
+          echo "   Scan ID: ${{ github.event.inputs.scan_id }}"
+          echo "   Target: ${{ github.event.inputs.target_url }}"
+          echo "   Client: ${{ github.event.inputs.client_id }}"
+          echo "   Completed: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo ""
+          echo "📁 Reports available in workflow artifacts"
+          echo ""

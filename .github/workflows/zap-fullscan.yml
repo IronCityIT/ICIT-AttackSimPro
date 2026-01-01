@@ -1,0 +1,206 @@
+name: AttackSimPro - ZAP Full Scan (Active)
+
+# ============================================================
+# FULL SCAN - Active spider and active scan
+# ⚠️  WARNING: This scan is AGGRESSIVE and may affect target
+# Only use on non-production or with explicit client approval
+# Triggered via CLI only - no manual runs without parameters
+# ============================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'Target URL or IP to scan (e.g., https://staging.example.com)'
+        required: true
+      scan_id:
+        description: 'Unique scan identifier from CLI'
+        required: true
+      client_id:
+        description: 'Client identifier for reporting'
+        required: false
+        default: 'internal'
+      scan_duration:
+        description: 'Max scan duration in minutes (default: 60)'
+        required: false
+        default: '60'
+      confirm_active:
+        description: 'Type CONFIRM to acknowledge this is an active scan'
+        required: true
+
+# Only allow one scan at a time per client
+concurrency:
+  group: zap-fullscan-${{ github.event.inputs.client_id }}
+  cancel-in-progress: false
+
+jobs:
+  full_scan:
+    name: ZAP Full Active Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate inputs
+        run: |
+          # Check required fields
+          if [ -z "${{ github.event.inputs.target_url }}" ]; then
+            echo "❌ ERROR: target_url is required"
+            exit 1
+          fi
+          if [ -z "${{ github.event.inputs.scan_id }}" ]; then
+            echo "❌ ERROR: scan_id is required"
+            exit 1
+          fi
+          
+          # CRITICAL: Confirm active scan acknowledgment
+          if [ "${{ github.event.inputs.confirm_active }}" != "CONFIRM" ]; then
+            echo "❌ ERROR: You must type 'CONFIRM' to run an active scan"
+            echo "   Active scans can affect target availability and trigger security alerts"
+            exit 1
+          fi
+          
+          # Basic URL validation
+          TARGET="${{ github.event.inputs.target_url }}"
+          if [[ ! "$TARGET" =~ ^https?:// ]]; then
+            echo "❌ ERROR: target_url must start with http:// or https://"
+            exit 1
+          fi
+          
+          echo "✅ Inputs validated"
+          echo "   Target: $TARGET"
+          echo "   Scan ID: ${{ github.event.inputs.scan_id }}"
+          echo "   Client: ${{ github.event.inputs.client_id }}"
+          echo "   Duration: ${{ github.event.inputs.scan_duration }} minutes"
+          echo "   Active Scan: CONFIRMED"
+
+      - name: Create working directories
+        run: |
+          mkdir -p zap-reports
+          chmod 777 zap-reports
+
+      - name: Purple Team Notification - ACTIVE Scan Starting
+        run: |
+          echo "🔴 =============================================="
+          echo "🔴 ACTIVE SECURITY SCAN STARTING"
+          echo "🔴 =============================================="
+          echo ""
+          echo "⚠️  WARNING: This is an ACTIVE scan that will:"
+          echo "   - Actively crawl and spider the target"
+          echo "   - Send potentially malicious payloads"
+          echo "   - May trigger WAF/IDS alerts"
+          echo "   - May affect target performance"
+          echo ""
+          echo "📋 Scan Details:"
+          echo "   Type: ZAP Full Scan (Active)"
+          echo "   Target: ${{ github.event.inputs.target_url }}"
+          echo "   Scan ID: ${{ github.event.inputs.scan_id }}"
+          echo "   Client: ${{ github.event.inputs.client_id }}"
+          echo "   Max Duration: ${{ github.event.inputs.scan_duration }} minutes"
+          echo "   Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo ""
+          echo "📊 Client security teams should expect increased traffic"
+          echo "   and potential security alerts during this scan."
+          echo ""
+
+      - name: Pull ZAP Docker Image
+        run: |
+          echo "Pulling OWASP ZAP Docker image..."
+          for i in {1..3}; do
+            docker pull ghcr.io/zaproxy/zaproxy:stable && break
+            echo "Retry $i..."
+            sleep 10
+          done
+
+      - name: Run ZAP Full Scan
+        id: zap_scan
+        run: |
+          echo "Starting ZAP Full Scan against ${{ github.event.inputs.target_url }}"
+          echo "Max duration: ${{ github.event.inputs.scan_duration }} minutes"
+          
+          docker run -v $(pwd)/zap-reports:/zap/wrk/:rw \
+            -t ghcr.io/zaproxy/zaproxy:stable \
+            zap-full-scan.py \
+            -t ${{ github.event.inputs.target_url }} \
+            -r zap-fullscan-${{ github.event.inputs.scan_id }}.html \
+            -J zap-fullscan-${{ github.event.inputs.scan_id }}.json \
+            -m ${{ github.event.inputs.scan_duration }} \
+            -I || true
+          
+          # Note: || true prevents workflow failure on ZAP findings
+
+      - name: Verify reports generated
+        run: |
+          echo "Checking for generated reports..."
+          ls -lh zap-reports/
+          
+          if [ -f "zap-reports/zap-fullscan-${{ github.event.inputs.scan_id }}.html" ]; then
+            echo "✅ HTML report generated successfully"
+          else
+            echo "❌ HTML report not found"
+            exit 1
+          fi
+
+      - name: Parse scan results
+        id: parse
+        run: |
+          JSON_FILE="zap-reports/zap-fullscan-${{ github.event.inputs.scan_id }}.json"
+          
+          if [ -f "$JSON_FILE" ]; then
+            HIGH=$(jq '[.site[].alerts[] | select(.riskdesc | startswith("High"))] | length' "$JSON_FILE" 2>/dev/null || echo "0")
+            MEDIUM=$(jq '[.site[].alerts[] | select(.riskdesc | startswith("Medium"))] | length' "$JSON_FILE" 2>/dev/null || echo "0")
+            LOW=$(jq '[.site[].alerts[] | select(.riskdesc | startswith("Low"))] | length' "$JSON_FILE" 2>/dev/null || echo "0")
+            INFO=$(jq '[.site[].alerts[] | select(.riskdesc | startswith("Informational"))] | length' "$JSON_FILE" 2>/dev/null || echo "0")
+            
+            echo "high=$HIGH" >> $GITHUB_OUTPUT
+            echo "medium=$MEDIUM" >> $GITHUB_OUTPUT
+            echo "low=$LOW" >> $GITHUB_OUTPUT
+            echo "info=$INFO" >> $GITHUB_OUTPUT
+            
+            echo ""
+            echo "🔴 =============================================="
+            echo "🔴 ACTIVE SCAN RESULTS SUMMARY"
+            echo "🔴 =============================================="
+            echo "  🔴 High Risk:    $HIGH"
+            echo "  🟠 Medium Risk:  $MEDIUM"
+            echo "  🟡 Low Risk:     $LOW"
+            echo "  ℹ️  Informational: $INFO"
+            echo ""
+            
+            # Generate top findings summary
+            echo "📋 Top Findings:"
+            jq -r '.site[].alerts[] | select(.riskdesc | startswith("High") or startswith("Medium")) | "  - [\(.riskdesc | split(" ")[0])] \(.name)"' "$JSON_FILE" 2>/dev/null | head -10 || echo "  No high/medium findings"
+          else
+            echo "⚠️ Could not parse JSON results"
+            echo "high=0" >> $GITHUB_OUTPUT
+            echo "medium=0" >> $GITHUB_OUTPUT
+            echo "low=0" >> $GITHUB_OUTPUT
+            echo "info=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload scan artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-fullscan-${{ github.event.inputs.scan_id }}
+          path: zap-reports/
+          retention-days: 90
+
+      - name: Purple Team Notification - Active Scan Complete
+        run: |
+          echo ""
+          echo "🔴 =============================================="
+          echo "🔴 ACTIVE SCAN COMPLETE"
+          echo "🔴 =============================================="
+          echo ""
+          echo "📋 Summary:"
+          echo "   Scan ID: ${{ github.event.inputs.scan_id }}"
+          echo "   Target: ${{ github.event.inputs.target_url }}"
+          echo "   Client: ${{ github.event.inputs.client_id }}"
+          echo "   Completed: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo ""
+          echo "📁 Reports available in workflow artifacts"
+          echo ""
+          echo "⚠️  Recommend reviewing WAF/IDS logs for any blocked attacks"
+          echo ""

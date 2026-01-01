@@ -1,0 +1,381 @@
+name: AttackSimPro - ZAP Authenticated Scan
+
+# ============================================================
+# AUTHENTICATED SCAN - Scan pages behind login
+# Requires credentials stored in GitHub Secrets
+# Triggered via CLI only - no manual runs without parameters
+# ============================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'Target URL to scan (e.g., https://app.example.com/dashboard)'
+        required: true
+      login_url:
+        description: 'Login page URL (e.g., https://app.example.com/login)'
+        required: true
+      scan_id:
+        description: 'Unique scan identifier from CLI'
+        required: true
+      client_id:
+        description: 'Client identifier for reporting'
+        required: true
+      username_field:
+        description: 'Login form username field name (default: username)'
+        required: false
+        default: 'username'
+      password_field:
+        description: 'Login form password field name (default: password)'
+        required: false
+        default: 'password'
+      logged_in_indicator:
+        description: 'Regex to detect logged-in state (e.g., "Welcome|Dashboard|Logout")'
+        required: false
+        default: 'logout|sign.out|log.out'
+
+# Only allow one authenticated scan at a time per client
+concurrency:
+  group: zap-auth-${{ github.event.inputs.client_id }}
+  cancel-in-progress: false
+
+jobs:
+  auth_scan:
+    name: ZAP Authenticated Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate inputs
+        run: |
+          if [ -z "${{ github.event.inputs.target_url }}" ]; then
+            echo "❌ ERROR: target_url is required"
+            exit 1
+          fi
+          if [ -z "${{ github.event.inputs.login_url }}" ]; then
+            echo "❌ ERROR: login_url is required"
+            exit 1
+          fi
+          if [ -z "${{ github.event.inputs.scan_id }}" ]; then
+            echo "❌ ERROR: scan_id is required"
+            exit 1
+          fi
+          if [ -z "${{ github.event.inputs.client_id }}" ]; then
+            echo "❌ ERROR: client_id is required for authenticated scans"
+            exit 1
+          fi
+          
+          echo "✅ Inputs validated"
+
+      - name: Check for credentials
+        env:
+          # Credentials should be stored as: SCAN_CREDS_<CLIENT_ID>_USER and SCAN_CREDS_<CLIENT_ID>_PASS
+          # e.g., SCAN_CREDS_ACME_USER and SCAN_CREDS_ACME_PASS
+          CLIENT_USER_VAR: SCAN_CREDS_${{ github.event.inputs.client_id }}_USER
+          CLIENT_PASS_VAR: SCAN_CREDS_${{ github.event.inputs.client_id }}_PASS
+        run: |
+          # Check if credentials exist (we'll use dynamic secret lookup)
+          echo "Looking for credentials for client: ${{ github.event.inputs.client_id }}"
+          echo "Expected secrets: SCAN_CREDS_${{ github.event.inputs.client_id }}_USER"
+          echo "                  SCAN_CREDS_${{ github.event.inputs.client_id }}_PASS"
+          echo ""
+          echo "⚠️  Note: Credentials must be pre-configured in GitHub Secrets"
+
+      - name: Create working directories
+        run: |
+          mkdir -p zap-reports
+          mkdir -p zap-config
+          chmod 777 zap-reports
+          chmod 777 zap-config
+
+      - name: Purple Team Notification - Authenticated Scan Starting
+        run: |
+          echo "🟠 =============================================="
+          echo "🟠 AUTHENTICATED SECURITY SCAN STARTING"
+          echo "🟠 =============================================="
+          echo ""
+          echo "📋 Scan Details:"
+          echo "   Type: ZAP Authenticated Scan"
+          echo "   Target: ${{ github.event.inputs.target_url }}"
+          echo "   Login URL: ${{ github.event.inputs.login_url }}"
+          echo "   Client: ${{ github.event.inputs.client_id }}"
+          echo "   Scan ID: ${{ github.event.inputs.scan_id }}"
+          echo "   Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo ""
+          echo "🔐 This scan will authenticate and test protected areas."
+          echo ""
+
+      - name: Pull ZAP Docker Image
+        run: |
+          echo "Pulling OWASP ZAP Docker image..."
+          for i in {1..3}; do
+            docker pull ghcr.io/zaproxy/zaproxy:stable && break
+            echo "Retry $i..."
+            sleep 10
+          done
+
+      - name: Create ZAP authentication context
+        env:
+          SCAN_USERNAME: ${{ secrets[format('SCAN_CREDS_{0}_USER', github.event.inputs.client_id)] }}
+          SCAN_PASSWORD: ${{ secrets[format('SCAN_CREDS_{0}_PASS', github.event.inputs.client_id)] }}
+        run: |
+          # Create ZAP context file for form-based authentication
+          cat > zap-config/auth-context.context <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <configuration>
+            <context>
+              <name>AuthContext</name>
+              <desc>Authentication context for ${{ github.event.inputs.client_id }}</desc>
+              <inscope>true</inscope>
+              <incregexes>${{ github.event.inputs.target_url }}.*</incregexes>
+              <tech>
+                <include>Db</include>
+                <include>Db.CouchDB</include>
+                <include>Db.Firebird</include>
+                <include>Db.HypersonicSQL</include>
+                <include>Db.IBM DB2</include>
+                <include>Db.Microsoft Access</include>
+                <include>Db.Microsoft SQL Server</include>
+                <include>Db.MongoDB</include>
+                <include>Db.MySQL</include>
+                <include>Db.Oracle</include>
+                <include>Db.PostgreSQL</include>
+                <include>Db.SAP MaxDB</include>
+                <include>Db.SQLite</include>
+                <include>Db.Sybase</include>
+                <include>Language</include>
+                <include>Language.ASP</include>
+                <include>Language.C</include>
+                <include>Language.JSP/Servlet</include>
+                <include>Language.Java</include>
+                <include>Language.JavaScript</include>
+                <include>Language.PHP</include>
+                <include>Language.Python</include>
+                <include>Language.Ruby</include>
+                <include>Language.XML</include>
+                <include>OS</include>
+                <include>OS.Linux</include>
+                <include>OS.MacOS</include>
+                <include>OS.Windows</include>
+                <include>SCM</include>
+                <include>SCM.Git</include>
+                <include>SCM.SVN</include>
+                <include>WS</include>
+                <include>WS.Apache</include>
+                <include>WS.IIS</include>
+                <include>WS.Tomcat</include>
+              </tech>
+              <urlparser>
+                <class>org.zaproxy.zap.model.StandardParameterParser</class>
+                <config></config>
+              </urlparser>
+              <postparser>
+                <class>org.zaproxy.zap.model.StandardParameterParser</class>
+                <config></config>
+              </postparser>
+              <authentication>
+                <type>2</type>
+                <loggedin>${{ github.event.inputs.logged_in_indicator }}</loggedin>
+                <form>
+                  <loginurl>${{ github.event.inputs.login_url }}</loginurl>
+                  <loginbody>${{ github.event.inputs.username_field }}={%username%}&amp;${{ github.event.inputs.password_field }}={%password%}</loginbody>
+                </form>
+              </authentication>
+              <users>
+                <user>
+                  <name>testuser</name>
+                  <credentials>
+                    <username>${SCAN_USERNAME}</username>
+                    <password>${SCAN_PASSWORD}</password>
+                  </credentials>
+                </user>
+              </users>
+            </context>
+          </configuration>
+          EOF
+          
+          echo "✅ Authentication context created"
+
+      - name: Create ZAP automation config
+        env:
+          SCAN_USERNAME: ${{ secrets[format('SCAN_CREDS_{0}_USER', github.event.inputs.client_id)] }}
+          SCAN_PASSWORD: ${{ secrets[format('SCAN_CREDS_{0}_PASS', github.event.inputs.client_id)] }}
+        run: |
+          cat > zap-config/auth-scan.yaml <<EOF
+          ---
+          env:
+            contexts:
+              - name: "AuthContext"
+                urls:
+                  - "${{ github.event.inputs.target_url }}"
+                includePaths:
+                  - "${{ github.event.inputs.target_url }}.*"
+                authentication:
+                  method: "form"
+                  parameters:
+                    loginUrl: "${{ github.event.inputs.login_url }}"
+                    loginRequestData: "${{ github.event.inputs.username_field }}={%username%}&${{ github.event.inputs.password_field }}={%password%}"
+                  verification:
+                    method: "response"
+                    loggedInRegex: "${{ github.event.inputs.logged_in_indicator }}"
+                users:
+                  - name: "testuser"
+                    credentials:
+                      username: "${SCAN_USERNAME}"
+                      password: "${SCAN_PASSWORD}"
+            parameters:
+              failOnError: false
+              failOnWarning: false
+              progressToStdout: true
+
+          jobs:
+            - type: spider
+              parameters:
+                context: "AuthContext"
+                user: "testuser"
+                url: "${{ github.event.inputs.target_url }}"
+                maxDuration: 10
+                maxDepth: 5
+                maxChildren: 10
+
+            - type: spiderAjax
+              parameters:
+                context: "AuthContext"
+                user: "testuser"
+                url: "${{ github.event.inputs.target_url }}"
+                maxDuration: 10
+                maxCrawlDepth: 5
+                numberOfBrowsers: 2
+
+            - type: passiveScan-wait
+              parameters:
+                maxDuration: 5
+
+            - type: activeScan
+              parameters:
+                context: "AuthContext"
+                user: "testuser"
+                policy: "Default Policy"
+                maxRuleDurationInMins: 5
+                maxScanDurationInMins: 30
+
+            - type: report
+              parameters:
+                template: "traditional-html"
+                reportDir: "/zap/wrk"
+                reportFile: "zap-auth-${{ github.event.inputs.scan_id }}"
+
+            - type: report
+              parameters:
+                template: "traditional-json"
+                reportDir: "/zap/wrk"
+                reportFile: "zap-auth-${{ github.event.inputs.scan_id }}"
+          EOF
+          
+          echo "✅ Automation config created"
+
+      - name: Run ZAP Authenticated Scan
+        env:
+          SCAN_USERNAME: ${{ secrets[format('SCAN_CREDS_{0}_USER', github.event.inputs.client_id)] }}
+          SCAN_PASSWORD: ${{ secrets[format('SCAN_CREDS_{0}_PASS', github.event.inputs.client_id)] }}
+        run: |
+          echo "Starting ZAP Authenticated Scan..."
+          
+          # Use automation framework for authenticated scanning
+          docker run -v $(pwd)/zap-reports:/zap/wrk/:rw \
+            -v $(pwd)/zap-config:/zap/config/:ro \
+            -e SCAN_USERNAME="$SCAN_USERNAME" \
+            -e SCAN_PASSWORD="$SCAN_PASSWORD" \
+            -t ghcr.io/zaproxy/zaproxy:stable \
+            zap.sh -cmd -autorun /zap/config/auth-scan.yaml || true
+
+      - name: Fallback to basic auth scan
+        if: failure()
+        run: |
+          echo "Automation framework failed, trying basic auth approach..."
+          
+          # Simpler approach using curl to get session, then scan
+          docker run -v $(pwd)/zap-reports:/zap/wrk/:rw \
+            -t ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py \
+            -t ${{ github.event.inputs.target_url }} \
+            -r zap-auth-${{ github.event.inputs.scan_id }}.html \
+            -J zap-auth-${{ github.event.inputs.scan_id }}.json \
+            -I || true
+
+      - name: Verify reports generated
+        run: |
+          echo "Checking for generated reports..."
+          ls -lh zap-reports/
+          
+          # Check for any report file
+          if ls zap-reports/zap-auth-${{ github.event.inputs.scan_id }}* 1>/dev/null 2>&1; then
+            echo "✅ Reports generated successfully"
+          else
+            echo "⚠️ Reports may not have been generated"
+          fi
+
+      - name: Parse scan results
+        id: parse
+        run: |
+          JSON_FILE=$(ls zap-reports/zap-auth-${{ github.event.inputs.scan_id }}*.json 2>/dev/null | head -1)
+          
+          if [ -f "$JSON_FILE" ]; then
+            HIGH=$(jq '[.site[].alerts[] | select(.riskdesc | startswith("High"))] | length' "$JSON_FILE" 2>/dev/null || echo "0")
+            MEDIUM=$(jq '[.site[].alerts[] | select(.riskdesc | startswith("Medium"))] | length' "$JSON_FILE" 2>/dev/null || echo "0")
+            LOW=$(jq '[.site[].alerts[] | select(.riskdesc | startswith("Low"))] | length' "$JSON_FILE" 2>/dev/null || echo "0")
+            INFO=$(jq '[.site[].alerts[] | select(.riskdesc | startswith("Informational"))] | length' "$JSON_FILE" 2>/dev/null || echo "0")
+            
+            echo "high=$HIGH" >> $GITHUB_OUTPUT
+            echo "medium=$MEDIUM" >> $GITHUB_OUTPUT
+            echo "low=$LOW" >> $GITHUB_OUTPUT
+            echo "info=$INFO" >> $GITHUB_OUTPUT
+            
+            echo ""
+            echo "🟠 =============================================="
+            echo "🟠 AUTHENTICATED SCAN RESULTS SUMMARY"
+            echo "🟠 =============================================="
+            echo "  🔴 High Risk:    $HIGH"
+            echo "  🟠 Medium Risk:  $MEDIUM"
+            echo "  🟡 Low Risk:     $LOW"
+            echo "  ℹ️  Informational: $INFO"
+            echo ""
+            
+            echo "📋 Authentication-Related Findings:"
+            jq -r '.site[].alerts[] | select(.name | test("session|cookie|token|auth|access|priv"; "i")) | "  - [\(.riskdesc | split(" ")[0])] \(.name)"' "$JSON_FILE" 2>/dev/null | head -10 || echo "  No auth-specific findings"
+          else
+            echo "⚠️ Could not parse JSON results"
+            echo "high=0" >> $GITHUB_OUTPUT
+            echo "medium=0" >> $GITHUB_OUTPUT
+            echo "low=0" >> $GITHUB_OUTPUT
+            echo "info=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload scan artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-auth-${{ github.event.inputs.scan_id }}
+          path: zap-reports/
+          retention-days: 90
+
+      - name: Purple Team Notification - Authenticated Scan Complete
+        run: |
+          echo ""
+          echo "🟠 =============================================="
+          echo "🟠 AUTHENTICATED SCAN COMPLETE"
+          echo "🟠 =============================================="
+          echo ""
+          echo "📋 Summary:"
+          echo "   Scan ID: ${{ github.event.inputs.scan_id }}"
+          echo "   Target: ${{ github.event.inputs.target_url }}"
+          echo "   Client: ${{ github.event.inputs.client_id }}"
+          echo "   Completed: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo ""
+          echo "📁 Reports available in workflow artifacts"
+          echo ""
+          echo "🔐 Authenticated scanning tests logged-in user paths"
+          echo "   including session management and access controls."
+          echo ""
