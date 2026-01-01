@@ -1,117 +1,198 @@
-name: AttackSimPro - ZAP Baseline (Purple Team)
+name: AttackSimPro - ZAP Baseline (Passive)
+
+# ============================================================
+# BASELINE SCAN - Passive spider and scan
+# Safe for production environments
+# Triggered via CLI only - no manual runs without parameters
+# ============================================================
 
 on:
-  schedule:
-    - cron: '0 2 * * 1'  # Weekly Monday 2am
   workflow_dispatch:
     inputs:
       target_url:
-        description: 'Target URL to scan'
+        description: 'Target URL or IP to scan (e.g., https://example.com or http://192.168.1.100)'
+        required: true
+      scan_id:
+        description: 'Unique scan identifier from CLI'
+        required: true
+      client_id:
+        description: 'Client identifier for reporting'
         required: false
-        default: 'https://www.ironcityit.com'
+        default: 'internal'
 
+# Only allow one scan at a time per target
 concurrency:
-  group: zap-baseline-scan
+  group: zap-baseline-${{ github.event.inputs.client_id }}
   cancel-in-progress: false
 
 jobs:
-  zap_baseline:
-    name: 🟣 ZAP Baseline Scan
+  baseline_scan:
+    name: ZAP Baseline Security Scan
     runs-on: ubuntu-latest
     
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      
-      - name: Set target URL
-        id: target
+
+      - name: Validate inputs
         run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ -n "${{ github.event.inputs.target_url }}" ]; then
-            echo "url=${{ github.event.inputs.target_url }}" >> $GITHUB_OUTPUT
-          else
-            echo "url=https://www.ironcityit.com" >> $GITHUB_OUTPUT
+          if [ -z "${{ github.event.inputs.target_url }}" ]; then
+            echo "❌ ERROR: target_url is required"
+            exit 1
           fi
-      
-      - name: Create working directory
+          if [ -z "${{ github.event.inputs.scan_id }}" ]; then
+            echo "❌ ERROR: scan_id is required"
+            exit 1
+          fi
+          
+          # Basic URL validation
+          TARGET="${{ github.event.inputs.target_url }}"
+          if [[ ! "$TARGET" =~ ^https?:// ]]; then
+            echo "❌ ERROR: target_url must start with http:// or https://"
+            exit 1
+          fi
+          
+          echo "✅ Inputs validated"
+          echo "   Target: $TARGET"
+          echo "   Scan ID: ${{ github.event.inputs.scan_id }}"
+          echo "   Client: ${{ github.event.inputs.client_id }}"
+
+      - name: Create working directories
         run: |
           mkdir -p zap-reports
           chmod 777 zap-reports
-      
-      - name: 🟣 Purple Team - Scan Starting
+
+      - name: Purple Team Notification - Scan Starting
         run: |
-          echo "════════════════════════════════════════"
-          echo "🟣 AttackSimPro - ZAP Baseline Scan"
-          echo "════════════════════════════════════════"
-          echo "Target: ${{ steps.target.outputs.url }}"
-          echo "Time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-      
+          echo "🟣 =============================================="
+          echo "🟣 PURPLE TEAM SECURITY SCAN STARTING"
+          echo "🟣 =============================================="
+          echo ""
+          echo "📋 Scan Details:"
+          echo "   Type: ZAP Baseline (Passive)"
+          echo "   Target: ${{ github.event.inputs.target_url }}"
+          echo "   Scan ID: ${{ github.event.inputs.scan_id }}"
+          echo "   Client: ${{ github.event.inputs.client_id }}"
+          echo "   Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo ""
+          echo "📊 This is a collaborative purple team engagement."
+          echo "   Client security teams should monitor their SIEM for scan activity."
+          echo ""
+
+      - name: Pull ZAP Docker Image
+        run: |
+          echo "Pulling OWASP ZAP Docker image..."
+          for i in {1..3}; do
+            docker pull ghcr.io/zaproxy/zaproxy:stable && break
+            echo "Retry $i..."
+            sleep 10
+          done
+
       - name: Run ZAP Baseline Scan
+        id: zap_scan
         run: |
+          echo "Starting ZAP Baseline Scan against ${{ github.event.inputs.target_url }}"
+          
           docker run -v $(pwd)/zap-reports:/zap/wrk/:rw \
             -t ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py \
-            -t ${{ steps.target.outputs.url }} \
-            -r zap-report.html \
-            -J zap-report.json \
+            -t ${{ github.event.inputs.target_url }} \
+            -r zap-report-${{ github.event.inputs.scan_id }}.html \
+            -J zap-report-${{ github.event.inputs.scan_id }}.json \
             -I || true
-      
-      - name: Parse Results
+          
+          # Note: || true prevents workflow failure on ZAP findings
+          # We want to capture results even if vulnerabilities are found
+
+      - name: Verify reports generated
+        run: |
+          echo "Checking for generated reports..."
+          ls -lh zap-reports/
+          
+          if [ -f "zap-reports/zap-report-${{ github.event.inputs.scan_id }}.html" ]; then
+            echo "✅ HTML report generated successfully"
+          else
+            echo "❌ HTML report not found"
+            exit 1
+          fi
+          
+          if [ -f "zap-reports/zap-report-${{ github.event.inputs.scan_id }}.json" ]; then
+            echo "✅ JSON report generated successfully"
+          else
+            echo "⚠️ JSON report not found (continuing anyway)"
+          fi
+
+      - name: Parse scan results
         id: parse
         run: |
-          if [ -f "zap-reports/zap-report.json" ]; then
-            HIGH=$(jq '[.site[].alerts[] | select(.riskdesc | startswith("High"))] | length' zap-reports/zap-report.json || echo "0")
-            MEDIUM=$(jq '[.site[].alerts[] | select(.riskdesc | startswith("Medium"))] | length' zap-reports/zap-report.json || echo "0")
-            LOW=$(jq '[.site[].alerts[] | select(.riskdesc | startswith("Low"))] | length' zap-reports/zap-report.json || echo "0")
-            INFO=$(jq '[.site[].alerts[] | select(.riskdesc | startswith("Informational"))] | length' zap-reports/zap-report.json || echo "0")
+          JSON_FILE="zap-reports/zap-report-${{ github.event.inputs.scan_id }}.json"
+          
+          if [ -f "$JSON_FILE" ]; then
+            HIGH=$(jq '[.site[].alerts[] | select(.riskdesc | startswith("High"))] | length' "$JSON_FILE" 2>/dev/null || echo "0")
+            MEDIUM=$(jq '[.site[].alerts[] | select(.riskdesc | startswith("Medium"))] | length' "$JSON_FILE" 2>/dev/null || echo "0")
+            LOW=$(jq '[.site[].alerts[] | select(.riskdesc | startswith("Low"))] | length' "$JSON_FILE" 2>/dev/null || echo "0")
+            INFO=$(jq '[.site[].alerts[] | select(.riskdesc | startswith("Informational"))] | length' "$JSON_FILE" 2>/dev/null || echo "0")
             
             echo "high=$HIGH" >> $GITHUB_OUTPUT
             echo "medium=$MEDIUM" >> $GITHUB_OUTPUT
             echo "low=$LOW" >> $GITHUB_OUTPUT
             echo "info=$INFO" >> $GITHUB_OUTPUT
+            
+            echo ""
+            echo "🟣 =============================================="
+            echo "🟣 SCAN RESULTS SUMMARY"
+            echo "🟣 =============================================="
+            echo "  🔴 High Risk:    $HIGH"
+            echo "  🟠 Medium Risk:  $MEDIUM"
+            echo "  🟡 Low Risk:     $LOW"
+            echo "  ℹ️  Informational: $INFO"
+            echo ""
+          else
+            echo "⚠️ Could not parse JSON results"
+            echo "high=0" >> $GITHUB_OUTPUT
+            echo "medium=0" >> $GITHUB_OUTPUT
+            echo "low=0" >> $GITHUB_OUTPUT
+            echo "info=0" >> $GITHUB_OUTPUT
           fi
-      
-      - name: 🚀 Upload to AttackSimPro Dashboard
-        if: always()
-        run: |
-          if [ -f "zap-reports/zap-report.json" ]; then
-            # Add scan_type to the JSON
-            jq '. + {scan_type: "zap"}' zap-reports/zap-report.json > zap-report-tagged.json
-            
-            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
-              -H "Content-Type: application/json" \
-              -d @zap-report-tagged.json \
-              "https://storescanresults-wrl6y3keaa-ul.a.run.app")
-            
-            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-            BODY=$(echo "$RESPONSE" | sed '$d')
-            
-            if [ "$HTTP_CODE" = "200" ]; then
-              echo "✅ Results uploaded to AttackSimPro Dashboard"
-              echo "$BODY" | jq '.' || echo "$BODY"
-            else
-              echo "⚠️  Upload failed (HTTP $HTTP_CODE)"
-              echo "$BODY"
-            fi
-          fi
-      
-      - name: Upload Artifacts
+
+      - name: Upload scan artifacts
         uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: zap-scan-results-${{ github.run_number }}
-          path: |
-            zap-reports/zap-report.html
-            zap-reports/zap-report.json
+          name: zap-baseline-${{ github.event.inputs.scan_id }}
+          path: zap-reports/
           retention-days: 90
-      
-      - name: 🟣 Scan Complete
-        if: always()
+
+      - name: Purple Team Notification - Scan Complete
         run: |
-          echo "════════════════════════════════════════"
-          echo "✅ ZAP Scan Complete"
-          echo "High: ${{ steps.parse.outputs.high || 'N/A' }}"
-          echo "Medium: ${{ steps.parse.outputs.medium || 'N/A' }}"
-          echo "Low: ${{ steps.parse.outputs.low || 'N/A' }}"
-          echo "Info: ${{ steps.parse.outputs.info || 'N/A' }}"
-          echo "Dashboard: https://ironcity-attacksimpro.web.app"
-          echo "════════════════════════════════════════"
+          echo ""
+          echo "🟣 =============================================="
+          echo "🟣 PURPLE TEAM SCAN COMPLETE"
+          echo "🟣 =============================================="
+          echo ""
+          echo "📋 Summary:"
+          echo "   Scan ID: ${{ github.event.inputs.scan_id }}"
+          echo "   Target: ${{ github.event.inputs.target_url }}"
+          echo "   Client: ${{ github.event.inputs.client_id }}"
+          echo "   Completed: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo ""
+          echo "📁 Reports available in workflow artifacts"
+          echo ""
+
+      # Optional: Send results to your backend/webhook
+      # - name: Send results to AttackSimPro API
+      #   if: ${{ secrets.ATTACKSIMPRO_API_URL }}
+      #   run: |
+      #     curl -X POST "${{ secrets.ATTACKSIMPRO_API_URL }}/api/scans/complete" \
+      #       -H "Authorization: Bearer ${{ secrets.ATTACKSIMPRO_API_KEY }}" \
+      #       -H "Content-Type: application/json" \
+      #       -d '{
+      #         "scan_id": "${{ github.event.inputs.scan_id }}",
+      #         "scan_type": "baseline",
+      #         "target": "${{ github.event.inputs.target_url }}",
+      #         "client_id": "${{ github.event.inputs.client_id }}",
+      #         "high": ${{ steps.parse.outputs.high }},
+      #         "medium": ${{ steps.parse.outputs.medium }},
+      #         "low": ${{ steps.parse.outputs.low }},
+      #         "info": ${{ steps.parse.outputs.info }}
+      #       }'
+
