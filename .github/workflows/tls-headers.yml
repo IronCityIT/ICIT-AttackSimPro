@@ -1,164 +1,384 @@
 name: AttackSimPro - TLS & Headers Evidence
 
+# ============================================================
+# TLS & HEADERS SCAN - Collect SSL/TLS config and security headers
+# Evidence collection for compliance and security posture
+# Triggered via CLI only - no manual runs without parameters
+# ============================================================
+
 on:
-  schedule:
-    - cron: "15 2 * * *" # Daily 02:15 UTC
   workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'Target URL to scan (e.g., https://example.com)'
+        required: true
+      scan_id:
+        description: 'Unique scan identifier from CLI'
+        required: true
+      client_id:
+        description: 'Client identifier for reporting'
+        required: false
+        default: 'internal'
 
 permissions:
   contents: read
 
+# Only allow one scan at a time per client
+concurrency:
+  group: tls-headers-${{ github.event.inputs.client_id }}
+  cancel-in-progress: false
+
 jobs:
   tls_headers:
-    name: 🟣 TLS & Security Headers Check
+    name: TLS & Security Headers Check
     runs-on: ubuntu-latest
-    
+    timeout-minutes: 30
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-      
-      - name: Validate targets list
+
+      - name: Validate inputs
         run: |
-          set -euo pipefail
-          test -f manifests/targets.txt
-          sed -i '/^\s*$/d' manifests/targets.txt
-          echo "Targets:"
-          cat manifests/targets.txt
-      
-      - name: 🟣 Purple Team - Scan Starting
+          if [ -z "${{ github.event.inputs.target_url }}" ]; then
+            echo "❌ ERROR: target_url is required"
+            exit 1
+          fi
+          if [ -z "${{ github.event.inputs.scan_id }}" ]; then
+            echo "❌ ERROR: scan_id is required"
+            exit 1
+          fi
+          
+          # Basic URL validation - must be HTTPS for TLS checks
+          TARGET="${{ github.event.inputs.target_url }}"
+          if [[ ! "$TARGET" =~ ^https:// ]]; then
+            echo "⚠️ WARNING: Target should be https:// for TLS analysis"
+            echo "   Proceeding anyway, but TLS checks may fail for http://"
+          fi
+          
+          echo "✅ Inputs validated"
+          echo "   Target: $TARGET"
+          echo "   Scan ID: ${{ github.event.inputs.scan_id }}"
+          echo "   Client: ${{ github.event.inputs.client_id }}"
+
+      - name: Install dependencies
         run: |
-          echo "════════════════════════════════════════"
-          echo "🟣 AttackSimPro - TLS & Headers Check"
-          echo "════════════════════════════════════════"
-          echo "Targets: $(wc -l < manifests/targets.txt)"
-          echo "Time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-      
-      - name: Collect TLS and headers
-        run: |
-          set -euo pipefail
           sudo apt-get update -y
           sudo apt-get install -y jq openssl curl
-          TS="$(date -u +'%Y-%m-%dT%H-%M-%SZ')"
-          mkdir -p out/tls-headers
-          
-          # Array to collect all evidence
-          echo "[]" > out/tls-headers/all-evidence.json
-          
-          while IFS= read -r url; do
-            url="$(echo "$url" | xargs)"
-            [ -z "$url" ] && continue
-            
-            host="$(echo "$url" | sed -E 's#https?://##' | cut -d/ -f1)"
-            safe_host="$(echo "$host" | tr ':' '_' )"
-            
-            # Get TLS cert info
-            CERT_DATES="$(echo | openssl s_client -servername "$host" -connect "$host:443" 2>/dev/null | openssl x509 -noout -dates || true)"
-            NOT_BEFORE="$(echo "$CERT_DATES" | grep -i notBefore | cut -d= -f2- | sed 's/^[[:space:]]*//')"
-            NOT_AFTER="$(echo "$CERT_DATES" | grep -i notAfter  | cut -d= -f2- | sed 's/^[[:space:]]*//')"
-            
-            # Get HTTP headers
-            HDRS="out/tls-headers/headers_${safe_host}_${TS}.txt"
-            curl -sS -D "$HDRS" -o /dev/null "$url" || true
-            
-            get_hdr () { grep -i "^$1:" "$HDRS" | head -n 1 | sed -E "s/^$1:[[:space:]]*//I" || true; }
-            
-            # Create evidence JSON
-            EVIDENCE=$(jq -n \
-              --arg ts "$TS" \
-              --arg url "$url" \
-              --arg host "$host" \
-              --arg not_before "$NOT_BEFORE" \
-              --arg not_after "$NOT_AFTER" \
-              --arg hsts "$(get_hdr 'Strict-Transport-Security')" \
-              --arg csp "$(get_hdr 'Content-Security-Policy')" \
-              --arg xfo "$(get_hdr 'X-Frame-Options')" \
-              --arg xcto "$(get_hdr 'X-Content-Type-Options')" \
-              --arg rp "$(get_hdr 'Referrer-Policy')" \
-              --arg pp "$(get_hdr 'Permissions-Policy')" \
-              '{
-                timestamp_utc: $ts,
-                url: $url,
-                host: $host,
-                tls: { not_before: $not_before, not_after: $not_after },
-                headers: {
-                  strict_transport_security: $hsts,
-                  content_security_policy: $csp,
-                  x_frame_options: $xfo,
-                  x_content_type_options: $xcto,
-                  referrer_policy: $rp,
-                  permissions_policy: $pp
-                }
-              }')
-            
-            # Save individual evidence
-            echo "$EVIDENCE" > "out/tls-headers/evidence_${safe_host}_${TS}.json"
-            
-            # Append to all-evidence array
-            jq --argjson item "$EVIDENCE" '. += [$item]' out/tls-headers/all-evidence.json > out/tls-headers/all-evidence.tmp.json
-            mv out/tls-headers/all-evidence.tmp.json out/tls-headers/all-evidence.json
-            
-          done < manifests/targets.txt
-          
-          # Create manifest
-          jq -n \
-            --arg ts "$TS" \
-            --arg job "TLS & Headers Evidence" \
-            --arg targets "$(paste -sd "," manifests/targets.txt)" \
-            '{
-              product: "ICIT AttackSimPro",
-              job: $job,
-              timestamp_utc: $ts,
-              targets_csv: $targets
-            }' > out/tls-headers/manifest.json
-          
-          # Create Cloud Function payload
-          jq -n \
-            --arg ts "$TS" \
-            --argjson evidence "$(cat out/tls-headers/all-evidence.json)" \
-            '{
-              scan_type: "tls_headers",
-              timestamp: $ts,
-              evidence: $evidence
-            }' > out/tls-headers/cloud-payload.json
-      
-      - name: 🚀 Upload to AttackSimPro Dashboard
-        if: always()
+
+      - name: Create output directory
         run: |
-          if [ -f "out/tls-headers/cloud-payload.json" ]; then
-            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
-              -H "Content-Type: application/json" \
-              -d @out/tls-headers/cloud-payload.json \
-              "https://storescanresults-wrl6y3keaa-ul.a.run.app")
-            
-            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-            BODY=$(echo "$RESPONSE" | sed '$d')
-            
-            if [ "$HTTP_CODE" = "200" ]; then
-              echo "✅ Results uploaded to AttackSimPro Dashboard"
-              echo "$BODY" | jq '.' || echo "$BODY"
+          mkdir -p tls-reports
+          chmod 777 tls-reports
+
+      - name: Purple Team Notification - Scan Starting
+        run: |
+          echo "🔐 =============================================="
+          echo "🔐 TLS & SECURITY HEADERS CHECK STARTING"
+          echo "🔐 =============================================="
+          echo ""
+          echo "📋 Scan Details:"
+          echo "   Type: TLS/SSL & Headers Evidence Collection"
+          echo "   Target: ${{ github.event.inputs.target_url }}"
+          echo "   Scan ID: ${{ github.event.inputs.scan_id }}"
+          echo "   Client: ${{ github.event.inputs.client_id }}"
+          echo "   Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo ""
+
+      - name: Extract host from URL
+        id: extract_host
+        run: |
+          TARGET="${{ github.event.inputs.target_url }}"
+          HOST=$(echo "$TARGET" | sed -E 's#https?://##' | sed -E 's#/.*##' | sed -E 's#:.*##')
+          PORT=$(echo "$TARGET" | grep -oE ':[0-9]+' | tr -d ':' || echo "443")
+          
+          if [ -z "$PORT" ]; then
+            if [[ "$TARGET" =~ ^https:// ]]; then
+              PORT="443"
             else
-              echo "⚠️  Upload failed (HTTP $HTTP_CODE)"
-              echo "$BODY"
+              PORT="80"
             fi
           fi
-      
-      - name: Package evidence
+          
+          echo "host=$HOST" >> $GITHUB_OUTPUT
+          echo "port=$PORT" >> $GITHUB_OUTPUT
+          echo "Extracted host: $HOST:$PORT"
+
+      - name: Collect TLS/SSL Certificate Info
+        id: tls_check
         run: |
-          TS="$(date -u +'%Y-%m-%dT%H-%M-%SZ')"
-          zip -r "attacksimpro_tls_headers_${TS}.zip" out/tls-headers manifests/targets.txt
-      
-      - name: Upload evidence artifact
+          HOST="${{ steps.extract_host.outputs.host }}"
+          PORT="${{ steps.extract_host.outputs.port }}"
+          SCAN_ID="${{ github.event.inputs.scan_id }}"
+          
+          echo "Checking TLS for $HOST:$PORT..."
+          
+          # Initialize results
+          TLS_ISSUES=0
+          
+          # Get certificate details
+          echo | openssl s_client -connect "$HOST:$PORT" -servername "$HOST" 2>/dev/null | \
+            openssl x509 -noout -text > "tls-reports/cert-$SCAN_ID.txt" 2>/dev/null || true
+          
+          # Get certificate chain
+          echo | openssl s_client -connect "$HOST:$PORT" -servername "$HOST" -showcerts 2>/dev/null > "tls-reports/chain-$SCAN_ID.txt" || true
+          
+          # Check certificate expiry
+          EXPIRY=$(echo | openssl s_client -connect "$HOST:$PORT" -servername "$HOST" 2>/dev/null | \
+            openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2 || echo "Unknown")
+          
+          # Check days until expiry
+          if [ "$EXPIRY" != "Unknown" ]; then
+            EXPIRY_EPOCH=$(date -d "$EXPIRY" +%s 2>/dev/null || echo "0")
+            NOW_EPOCH=$(date +%s)
+            DAYS_LEFT=$(( (EXPIRY_EPOCH - NOW_EPOCH) / 86400 ))
+            
+            if [ "$DAYS_LEFT" -lt 30 ]; then
+              echo "⚠️ Certificate expires in $DAYS_LEFT days!"
+              TLS_ISSUES=$((TLS_ISSUES + 1))
+            fi
+          else
+            DAYS_LEFT="Unknown"
+          fi
+          
+          # Check TLS versions supported
+          echo "Checking supported TLS versions..."
+          TLS_VERSIONS=""
+          
+          for VERSION in tls1 tls1_1 tls1_2 tls1_3; do
+            if echo | openssl s_client -connect "$HOST:$PORT" -servername "$HOST" -$VERSION 2>/dev/null | grep -q "Cipher"; then
+              TLS_VERSIONS="$TLS_VERSIONS $VERSION"
+              if [ "$VERSION" = "tls1" ] || [ "$VERSION" = "tls1_1" ]; then
+                echo "⚠️ Deprecated TLS version supported: $VERSION"
+                TLS_ISSUES=$((TLS_ISSUES + 1))
+              fi
+            fi
+          done
+          
+          # Get cipher suites
+          echo | openssl s_client -connect "$HOST:$PORT" -servername "$HOST" 2>/dev/null | \
+            grep -E "Cipher|Protocol" > "tls-reports/cipher-$SCAN_ID.txt" || true
+          
+          echo "tls_issues=$TLS_ISSUES" >> $GITHUB_OUTPUT
+          echo "expiry=$EXPIRY" >> $GITHUB_OUTPUT
+          echo "days_left=$DAYS_LEFT" >> $GITHUB_OUTPUT
+          echo "tls_versions=$TLS_VERSIONS" >> $GITHUB_OUTPUT
+          
+          echo ""
+          echo "📜 Certificate Expiry: $EXPIRY ($DAYS_LEFT days)"
+          echo "🔒 TLS Versions: $TLS_VERSIONS"
+
+      - name: Collect Security Headers
+        id: headers_check
+        run: |
+          TARGET="${{ github.event.inputs.target_url }}"
+          SCAN_ID="${{ github.event.inputs.scan_id }}"
+          
+          echo "Collecting security headers from $TARGET..."
+          
+          # Get all response headers
+          curl -sI -L --max-time 30 "$TARGET" > "tls-reports/headers-$SCAN_ID.txt" 2>/dev/null || true
+          
+          # Initialize counters
+          HEADERS_PRESENT=0
+          HEADERS_MISSING=0
+          HEADER_ISSUES=""
+          
+          # Check for security headers
+          declare -A SECURITY_HEADERS=(
+            ["Strict-Transport-Security"]="HSTS - Enforces HTTPS"
+            ["Content-Security-Policy"]="CSP - Prevents XSS"
+            ["X-Frame-Options"]="Clickjacking protection"
+            ["X-Content-Type-Options"]="MIME sniffing protection"
+            ["X-XSS-Protection"]="XSS filter (legacy)"
+            ["Referrer-Policy"]="Controls referrer info"
+            ["Permissions-Policy"]="Browser feature permissions"
+          )
+          
+          echo ""
+          echo "🔍 Security Headers Analysis:"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          for HEADER in "${!SECURITY_HEADERS[@]}"; do
+            if grep -qi "^$HEADER:" "tls-reports/headers-$SCAN_ID.txt" 2>/dev/null; then
+              VALUE=$(grep -i "^$HEADER:" "tls-reports/headers-$SCAN_ID.txt" | head -1)
+              echo "✅ $HEADER: Present"
+              HEADERS_PRESENT=$((HEADERS_PRESENT + 1))
+            else
+              echo "❌ $HEADER: Missing - ${SECURITY_HEADERS[$HEADER]}"
+              HEADERS_MISSING=$((HEADERS_MISSING + 1))
+              HEADER_ISSUES="$HEADER_ISSUES$HEADER,"
+            fi
+          done
+          
+          echo ""
+          echo "headers_present=$HEADERS_PRESENT" >> $GITHUB_OUTPUT
+          echo "headers_missing=$HEADERS_MISSING" >> $GITHUB_OUTPUT
+          echo "missing_headers=$HEADER_ISSUES" >> $GITHUB_OUTPUT
+
+      - name: Generate JSON report
+        run: |
+          SCAN_ID="${{ github.event.inputs.scan_id }}"
+          
+          cat > "tls-reports/report-$SCAN_ID.json" << EOF
+          {
+            "scan_id": "${{ github.event.inputs.scan_id }}",
+            "scan_type": "tls-headers",
+            "target": "${{ github.event.inputs.target_url }}",
+            "client_id": "${{ github.event.inputs.client_id }}",
+            "timestamp": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
+            "tls": {
+              "certificate_expiry": "${{ steps.tls_check.outputs.expiry }}",
+              "days_until_expiry": "${{ steps.tls_check.outputs.days_left }}",
+              "tls_versions": "${{ steps.tls_check.outputs.tls_versions }}",
+              "issues_found": ${{ steps.tls_check.outputs.tls_issues }}
+            },
+            "headers": {
+              "present": ${{ steps.headers_check.outputs.headers_present }},
+              "missing": ${{ steps.headers_check.outputs.headers_missing }},
+              "missing_headers": "${{ steps.headers_check.outputs.missing_headers }}"
+            },
+            "summary": {
+              "tls_issues": ${{ steps.tls_check.outputs.tls_issues }},
+              "header_issues": ${{ steps.headers_check.outputs.headers_missing }},
+              "total_issues": $(( ${{ steps.tls_check.outputs.tls_issues }} + ${{ steps.headers_check.outputs.headers_missing }} ))
+            }
+          }
+          EOF
+          
+          echo "✅ JSON report generated"
+          cat "tls-reports/report-$SCAN_ID.json"
+
+      - name: Generate HTML report
+        run: |
+          SCAN_ID="${{ github.event.inputs.scan_id }}"
+          
+          cat > "tls-reports/report-$SCAN_ID.html" << 'HTMLEOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>AttackSimPro - TLS & Headers Report</title>
+            <style>
+              body { font-family: Arial, sans-serif; margin: 20px; background: #1a1a2e; color: #eee; }
+              h1, h2 { color: #9d4edd; }
+              .summary { display: flex; gap: 20px; margin: 20px 0; }
+              .stat { padding: 15px 25px; border-radius: 8px; text-align: center; }
+              .good { background: #2d6a4f; }
+              .warning { background: #f77f00; }
+              .bad { background: #c1121f; }
+              .section { background: #16213e; padding: 15px; margin: 15px 0; border-radius: 8px; }
+              .header-item { padding: 8px; margin: 5px 0; border-radius: 4px; }
+              .present { background: #2d6a4f; }
+              .missing { background: #c1121f; }
+              pre { background: #0f0f23; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 12px; }
+            </style>
+          </head>
+          <body>
+          HTMLEOF
+          
+          cat >> "tls-reports/report-$SCAN_ID.html" << EOF
+            <h1>🔐 AttackSimPro - TLS & Headers Report</h1>
+            <p><strong>Target:</strong> ${{ github.event.inputs.target_url }}</p>
+            <p><strong>Scan ID:</strong> ${{ github.event.inputs.scan_id }}</p>
+            <p><strong>Client:</strong> ${{ github.event.inputs.client_id }}</p>
+            <p><strong>Timestamp:</strong> $(date -u '+%Y-%m-%d %H:%M:%S UTC')</p>
+            
+            <div class="summary">
+              <div class="stat $([ ${{ steps.tls_check.outputs.tls_issues }} -eq 0 ] && echo 'good' || echo 'warning')">
+                <strong>${{ steps.tls_check.outputs.tls_issues }}</strong><br>TLS Issues
+              </div>
+              <div class="stat $([ ${{ steps.headers_check.outputs.headers_missing }} -le 2 ] && echo 'good' || echo 'warning')">
+                <strong>${{ steps.headers_check.outputs.headers_missing }}</strong><br>Missing Headers
+              </div>
+              <div class="stat good">
+                <strong>${{ steps.headers_check.outputs.headers_present }}</strong><br>Headers Present
+              </div>
+            </div>
+            
+            <div class="section">
+              <h2>🔒 TLS/SSL Analysis</h2>
+              <p><strong>Certificate Expiry:</strong> ${{ steps.tls_check.outputs.expiry }}</p>
+              <p><strong>Days Until Expiry:</strong> ${{ steps.tls_check.outputs.days_left }}</p>
+              <p><strong>TLS Versions:</strong> ${{ steps.tls_check.outputs.tls_versions }}</p>
+            </div>
+            
+            <div class="section">
+              <h2>🛡️ Security Headers</h2>
+          EOF
+          
+          # Add header status
+          for HEADER in "Strict-Transport-Security" "Content-Security-Policy" "X-Frame-Options" "X-Content-Type-Options" "X-XSS-Protection" "Referrer-Policy" "Permissions-Policy"; do
+            if grep -qi "^$HEADER:" "tls-reports/headers-$SCAN_ID.txt" 2>/dev/null; then
+              echo "<div class='header-item present'>✅ $HEADER</div>" >> "tls-reports/report-$SCAN_ID.html"
+            else
+              echo "<div class='header-item missing'>❌ $HEADER - Missing</div>" >> "tls-reports/report-$SCAN_ID.html"
+            fi
+          done
+          
+          cat >> "tls-reports/report-$SCAN_ID.html" << 'HTMLEOF'
+            </div>
+            
+            <div class="section">
+              <h2>📄 Raw Headers</h2>
+              <pre id="raw-headers"></pre>
+            </div>
+            
+          </body>
+          </html>
+          HTMLEOF
+          
+          # Append raw headers
+          sed -i "s|<pre id=\"raw-headers\"></pre>|<pre>$(cat "tls-reports/headers-$SCAN_ID.txt" 2>/dev/null | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' || echo 'No headers collected')</pre>|" "tls-reports/report-$SCAN_ID.html" || true
+          
+          echo "✅ HTML report generated"
+
+      - name: Summary
+        id: summary
+        run: |
+          echo ""
+          echo "🔐 =============================================="
+          echo "🔐 TLS & HEADERS CHECK RESULTS"
+          echo "🔐 =============================================="
+          echo ""
+          echo "📋 TLS/SSL:"
+          echo "   Certificate Expiry: ${{ steps.tls_check.outputs.expiry }}"
+          echo "   Days Until Expiry: ${{ steps.tls_check.outputs.days_left }}"
+          echo "   TLS Issues: ${{ steps.tls_check.outputs.tls_issues }}"
+          echo ""
+          echo "📋 Security Headers:"
+          echo "   Present: ${{ steps.headers_check.outputs.headers_present }}"
+          echo "   Missing: ${{ steps.headers_check.outputs.headers_missing }}"
+          echo ""
+          
+          TOTAL_ISSUES=$(( ${{ steps.tls_check.outputs.tls_issues }} + ${{ steps.headers_check.outputs.headers_missing }} ))
+          if [ "$TOTAL_ISSUES" -eq 0 ]; then
+            echo "✅ Excellent! No issues found."
+          elif [ "$TOTAL_ISSUES" -le 3 ]; then
+            echo "⚠️ Minor issues found. Review recommended."
+          else
+            echo "🔴 Multiple issues found. Action required."
+          fi
+
+      - name: Upload scan artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: attacksimpro-tls-headers
-          path: attacksimpro_tls_headers_*.zip
-      
-      - name: 🟣 Scan Complete
-        if: always()
+          name: tls-headers-${{ github.event.inputs.scan_id }}
+          path: tls-reports/
+          retention-days: 90
+
+      - name: Purple Team Notification - Scan Complete
         run: |
-          TARGETS=$(jq 'length' out/tls-headers/all-evidence.json || echo "0")
-          echo "════════════════════════════════════════"
-          echo "✅ TLS & Headers Check Complete"
-          echo "Targets Scanned: $TARGETS"
-          echo "Dashboard: https://ironcity-attacksimpro.web.app"
-          echo "════════════════════════════════════════"
+          echo ""
+          echo "🔐 =============================================="
+          echo "🔐 TLS & HEADERS CHECK COMPLETE"
+          echo "🔐 =============================================="
+          echo ""
+          echo "📋 Summary:"
+          echo "   Scan ID: ${{ github.event.inputs.scan_id }}"
+          echo "   Target: ${{ github.event.inputs.target_url }}"
+          echo "   Client: ${{ github.event.inputs.client_id }}"
+          echo "   Completed: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo ""
+          echo "📁 Reports available in workflow artifacts"
+          echo ""
+
