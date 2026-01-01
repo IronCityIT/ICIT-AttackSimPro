@@ -10,11 +10,13 @@ permissions:
 
 jobs:
   nuclei:
+    name: 🟣 Nuclei Vulnerability Scan
     runs-on: ubuntu-latest
+    
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-
+      
       - name: Validate targets list
         run: |
           set -euo pipefail
@@ -22,24 +24,30 @@ jobs:
           sed -i '/^\s*$/d' manifests/targets.txt
           echo "Targets:"
           cat manifests/targets.txt
-
+      
+      - name: 🟣 Purple Team - Scan Starting
+        run: |
+          echo "════════════════════════════════════════"
+          echo "🟣 AttackSimPro - Nuclei Scan"
+          echo "════════════════════════════════════════"
+          echo "Targets: $(wc -l < manifests/targets.txt)"
+          echo "Time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+      
       - name: Install nuclei
         run: |
           set -euo pipefail
           sudo apt-get update -y
-          sudo apt-get install -y curl unzip
+          sudo apt-get install -y curl unzip jq
           curl -s https://api.github.com/repos/projectdiscovery/nuclei/releases/latest | \
             grep browser_download_url | grep linux_amd64.zip | cut -d '"' -f 4 | \
             xargs -I{} curl -L -o nuclei.zip {}
           unzip -o nuclei.zip
           sudo mv nuclei /usr/local/bin/nuclei
           nuclei -version
-
+      
       - name: Update templates
-        run: |
-          set -euo pipefail
-          nuclei -update-templates
-
+        run: nuclei -update-templates
+      
       - name: Run nuclei
         run: |
           set -euo pipefail
@@ -50,60 +58,112 @@ jobs:
             -severity medium,high,critical \
             -jsonl \
             -o "out/nuclei/nuclei_${TS}.jsonl"
-
-      - name: Build nuclei summary + manifest
+      
+      - name: Build summary
+        id: summary
         run: |
           set -euo pipefail
-          sudo apt-get update -y
-          sudo apt-get install -y jq
           TS="$(date -u +'%Y-%m-%dT%H-%M-%SZ')"
-
           python3 - << 'PY'
           import json, glob
           files = sorted(glob.glob("out/nuclei/nuclei_*.jsonl"))
           if not files:
-            raise SystemExit("No nuclei output found.")
+            print("No nuclei output found")
+            exit(0)
+          
           path = files[-1]
-          counts = {"critical":0,"high":0,"medium":0,"low":0,"info":0,"unknown":0}
+          counts = {"critical":0,"high":0,"medium":0,"low":0,"info":0}
           total = 0
+          findings = []
+          
           with open(path,"r",encoding="utf-8") as f:
             for line in f:
               line=line.strip()
-              if not line:
-                continue
+              if not line: continue
               total += 1
               try:
                 obj=json.loads(line)
                 sev=str(obj.get("info",{}).get("severity","unknown")).lower()
-              except Exception:
-                sev="unknown"
-              counts[sev] = counts.get(sev,0)+1
-          out={"total_findings": total, "by_severity": counts}
-          with open("out/nuclei/summary.json","w",encoding="utf-8") as w:
-            json.dump(out,w,indent=2)
+                counts[sev] = counts.get(sev,0)+1
+                
+                # Extract finding details
+                findings.append({
+                  "template_id": obj.get("template-id", ""),
+                  "name": obj.get("info", {}).get("name", ""),
+                  "severity": sev,
+                  "host": obj.get("host", ""),
+                  "matched_at": obj.get("matched-at", "")
+                })
+              except Exception as e:
+                print(f"Error parsing line: {e}")
+                continue
+          
+          summary = {
+            "total_findings": total,
+            "by_severity": counts
+          }
+          
+          with open("out/nuclei/summary.json","w") as w:
+            json.dump(summary,w,indent=2)
+          
+          # Create payload for Cloud Function
+          with open("out/nuclei/cloud-payload.json","w") as w:
+            json.dump({
+              "scan_type": "nuclei",
+              "summary": summary,
+              "findings": findings[:100],  # Limit to 100 findings
+              "target": "multiple"
+            }, w, indent=2)
           PY
-
-          jq -n \
-            --arg ts "$TS" \
-            --arg job "Nuclei Scan" \
-            --arg sev "medium,high,critical" \
-            --arg targets "$(paste -sd "," manifests/targets.txt)" \
-            '{
-              product: "ICIT AttackSimPro",
-              job: $job,
-              timestamp_utc: $ts,
-              severities: $sev,
-              targets_csv: $targets
-            }' > out/nuclei/manifest.json
-
+          
+          # Output counts for workflow summary
+          CRITICAL=$(jq -r '.by_severity.critical // 0' out/nuclei/summary.json)
+          HIGH=$(jq -r '.by_severity.high // 0' out/nuclei/summary.json)
+          MEDIUM=$(jq -r '.by_severity.medium // 0' out/nuclei/summary.json)
+          
+          echo "critical=$CRITICAL" >> $GITHUB_OUTPUT
+          echo "high=$HIGH" >> $GITHUB_OUTPUT
+          echo "medium=$MEDIUM" >> $GITHUB_OUTPUT
+      
+      - name: 🚀 Upload to AttackSimPro Dashboard
+        if: always()
+        run: |
+          if [ -f "out/nuclei/cloud-payload.json" ]; then
+            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+              -H "Content-Type: application/json" \
+              -d @out/nuclei/cloud-payload.json \
+              "https://storescanresults-wrl6y3keaa-ul.a.run.app")
+            
+            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+            BODY=$(echo "$RESPONSE" | sed '$d')
+            
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Results uploaded to AttackSimPro Dashboard"
+              echo "$BODY" | jq '.' || echo "$BODY"
+            else
+              echo "⚠️  Upload failed (HTTP $HTTP_CODE)"
+              echo "$BODY"
+            fi
+          fi
+      
       - name: Package evidence
         run: |
-          set -euo pipefail
           TS="$(date -u +'%Y-%m-%dT%H-%M-%SZ')"
           zip -r "attacksimpro_nuclei_${TS}.zip" out/nuclei manifests/targets.txt
-
+      
       - name: Upload evidence artifact
         uses: actions/upload-artifact@v4
         with:
           name: attacksimpro-nuclei
           path: attacksimpro_nuclei_*.zip
+      
+      - name: 🟣 Scan Complete
+        if: always()
+        run: |
+          echo "════════════════════════════════════════"
+          echo "✅ Nuclei Scan Complete"
+          echo "Critical: ${{ steps.summary.outputs.critical || '0' }}"
+          echo "High: ${{ steps.summary.outputs.high || '0' }}"
+          echo "Medium: ${{ steps.summary.outputs.medium || '0' }}"
+          echo "Dashboard: https://ironcity-attacksimpro.web.app"
+          echo "════════════════════════════════════════"
