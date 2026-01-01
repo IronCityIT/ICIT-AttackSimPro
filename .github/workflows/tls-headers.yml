@@ -382,3 +382,30 @@ jobs:
           echo "📁 Reports available in workflow artifacts"
           echo ""
 
+      - name: Post results to AttackSimPro Dashboard
+        if: always()
+        run: |
+          JSON_FILE="tls-reports/report-${{ github.event.inputs.scan_id }}.json"
+          
+          if [ -f "$JSON_FILE" ]; then
+            # Post the full TLS/Headers JSON report
+            curl -X POST "https://storescanresults-wrl6y3keaa-ul.a.run.app" \
+              -H "Content-Type: application/json" \
+              -d @"$JSON_FILE" || echo "Warning: Failed to post to dashboard"
+          else
+            # Fallback to summary
+            curl -X POST "https://storescanresults-wrl6y3keaa-ul.a.run.app" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "scan_id": "${{ github.event.inputs.scan_id }}",
+                "scan_type": "tls-headers",
+                "target_url": "${{ github.event.inputs.target_url }}",
+                "client_id": "${{ github.event.inputs.client_id }}",
+                "summary": {
+                  "tls_issues": ${{ steps.tls_check.outputs.tls_issues || 0 }},
+                  "headers_present": ${{ steps.headers_check.outputs.headers_present || 0 }},
+                  "headers_missing": ${{ steps.headers_check.outputs.headers_missing || 0 }},
+                  "cert_days_left": "${{ steps.tls_check.outputs.days_left }}"
+                }
+              }' || echo "Warning: Failed to post to dashboard"
+          fi
