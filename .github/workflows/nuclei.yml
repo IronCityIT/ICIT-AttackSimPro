@@ -1,169 +1,294 @@
 name: AttackSimPro - Nuclei Scan
 
+# ============================================================
+# NUCLEI SCAN - Fast vulnerability scanner using templates
+# Scans for CVEs, misconfigurations, exposed panels, etc.
+# Triggered via CLI only - no manual runs without parameters
+# ============================================================
+
 on:
-  schedule:
-    - cron: "30 3 * * 3" # Wednesdays 03:30 UTC
   workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'Target URL or IP to scan (e.g., https://example.com or http://192.168.1.100)'
+        required: true
+      scan_id:
+        description: 'Unique scan identifier from CLI'
+        required: true
+      client_id:
+        description: 'Client identifier for reporting'
+        required: false
+        default: 'internal'
+      severity:
+        description: 'Minimum severity to report (info, low, medium, high, critical)'
+        required: false
+        default: 'medium,high,critical'
+      template_tags:
+        description: 'Template tags to include (e.g., cve,exposure,misconfig)'
+        required: false
+        default: ''
 
 permissions:
   contents: read
 
+# Only allow one scan at a time per client
+concurrency:
+  group: nuclei-${{ github.event.inputs.client_id }}
+  cancel-in-progress: false
+
 jobs:
-  nuclei:
-    name: 🟣 Nuclei Vulnerability Scan
+  nuclei_scan:
+    name: Nuclei Vulnerability Scan
     runs-on: ubuntu-latest
-    
+    timeout-minutes: 60
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-      
-      - name: Validate targets list
+
+      - name: Validate inputs
+        run: |
+          if [ -z "${{ github.event.inputs.target_url }}" ]; then
+            echo "❌ ERROR: target_url is required"
+            exit 1
+          fi
+          if [ -z "${{ github.event.inputs.scan_id }}" ]; then
+            echo "❌ ERROR: scan_id is required"
+            exit 1
+          fi
+          
+          # Basic URL validation
+          TARGET="${{ github.event.inputs.target_url }}"
+          if [[ ! "$TARGET" =~ ^https?:// ]]; then
+            echo "❌ ERROR: target_url must start with http:// or https://"
+            exit 1
+          fi
+          
+          echo "✅ Inputs validated"
+          echo "   Target: $TARGET"
+          echo "   Scan ID: ${{ github.event.inputs.scan_id }}"
+          echo "   Client: ${{ github.event.inputs.client_id }}"
+          echo "   Severity: ${{ github.event.inputs.severity }}"
+
+      - name: Purple Team Notification - Scan Starting
+        run: |
+          echo "🟢 =============================================="
+          echo "🟢 NUCLEI VULNERABILITY SCAN STARTING"
+          echo "🟢 =============================================="
+          echo ""
+          echo "📋 Scan Details:"
+          echo "   Type: Nuclei Template Scan"
+          echo "   Target: ${{ github.event.inputs.target_url }}"
+          echo "   Scan ID: ${{ github.event.inputs.scan_id }}"
+          echo "   Client: ${{ github.event.inputs.client_id }}"
+          echo "   Severity Filter: ${{ github.event.inputs.severity }}"
+          echo "   Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo ""
+          echo "📊 Nuclei scans for CVEs, misconfigs, exposed panels, and more."
+          echo ""
+
+      - name: Install Nuclei
         run: |
           set -euo pipefail
-          test -f manifests/targets.txt
-          sed -i '/^\s*$/d' manifests/targets.txt
-          echo "Targets:"
-          cat manifests/targets.txt
-      
-      - name: 🟣 Purple Team - Scan Starting
-        run: |
-          echo "════════════════════════════════════════"
-          echo "🟣 AttackSimPro - Nuclei Scan"
-          echo "════════════════════════════════════════"
-          echo "Targets: $(wc -l < manifests/targets.txt)"
-          echo "Time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-      
-      - name: Install nuclei
-        run: |
-          set -euo pipefail
-          sudo apt-get update -y
-          sudo apt-get install -y curl unzip jq
+          echo "Installing Nuclei..."
+          
+          # Get latest release
           curl -s https://api.github.com/repos/projectdiscovery/nuclei/releases/latest | \
             grep browser_download_url | grep linux_amd64.zip | cut -d '"' -f 4 | \
             xargs -I{} curl -L -o nuclei.zip {}
+          
           unzip -o nuclei.zip
           sudo mv nuclei /usr/local/bin/nuclei
           nuclei -version
-      
-      - name: Update templates
-        run: nuclei -update-templates
-      
-      - name: Run nuclei
+
+      - name: Update Nuclei templates
         run: |
           set -euo pipefail
-          TS="$(date -u +'%Y-%m-%dT%H-%M-%SZ')"
-          mkdir -p out/nuclei
-          nuclei \
-            -l manifests/targets.txt \
-            -severity medium,high,critical \
-            -jsonl \
-            -o "out/nuclei/nuclei_${TS}.jsonl"
-      
-      - name: Build summary
-        id: summary
+          echo "Updating Nuclei templates..."
+          nuclei -update-templates
+          echo "✅ Templates updated"
+
+      - name: Create output directory
+        run: |
+          mkdir -p nuclei-reports
+          chmod 777 nuclei-reports
+
+      - name: Run Nuclei Scan
+        id: nuclei_scan
         run: |
           set -euo pipefail
-          TS="$(date -u +'%Y-%m-%dT%H-%M-%SZ')"
-          python3 - << 'PY'
-          import json, glob
-          files = sorted(glob.glob("out/nuclei/nuclei_*.jsonl"))
-          if not files:
-            print("No nuclei output found")
-            exit(0)
+          echo "Starting Nuclei scan against ${{ github.event.inputs.target_url }}"
           
-          path = files[-1]
-          counts = {"critical":0,"high":0,"medium":0,"low":0,"info":0}
-          total = 0
-          findings = []
+          # Build command with optional tags
+          NUCLEI_CMD="nuclei -u ${{ github.event.inputs.target_url }} -severity ${{ github.event.inputs.severity }} -jsonl -o nuclei-reports/nuclei-${{ github.event.inputs.scan_id }}.jsonl"
           
-          with open(path,"r",encoding="utf-8") as f:
-            for line in f:
-              line=line.strip()
-              if not line: continue
-              total += 1
-              try:
-                obj=json.loads(line)
-                sev=str(obj.get("info",{}).get("severity","unknown")).lower()
-                counts[sev] = counts.get(sev,0)+1
-                
-                # Extract finding details
-                findings.append({
-                  "template_id": obj.get("template-id", ""),
-                  "name": obj.get("info", {}).get("name", ""),
-                  "severity": sev,
-                  "host": obj.get("host", ""),
-                  "matched_at": obj.get("matched-at", "")
-                })
-              except Exception as e:
-                print(f"Error parsing line: {e}")
-                continue
-          
-          summary = {
-            "total_findings": total,
-            "by_severity": counts
-          }
-          
-          with open("out/nuclei/summary.json","w") as w:
-            json.dump(summary,w,indent=2)
-          
-          # Create payload for Cloud Function
-          with open("out/nuclei/cloud-payload.json","w") as w:
-            json.dump({
-              "scan_type": "nuclei",
-              "summary": summary,
-              "findings": findings[:100],  # Limit to 100 findings
-              "target": "multiple"
-            }, w, indent=2)
-          PY
-          
-          # Output counts for workflow summary
-          CRITICAL=$(jq -r '.by_severity.critical // 0' out/nuclei/summary.json)
-          HIGH=$(jq -r '.by_severity.high // 0' out/nuclei/summary.json)
-          MEDIUM=$(jq -r '.by_severity.medium // 0' out/nuclei/summary.json)
-          
-          echo "critical=$CRITICAL" >> $GITHUB_OUTPUT
-          echo "high=$HIGH" >> $GITHUB_OUTPUT
-          echo "medium=$MEDIUM" >> $GITHUB_OUTPUT
-      
-      - name: 🚀 Upload to AttackSimPro Dashboard
-        if: always()
-        run: |
-          if [ -f "out/nuclei/cloud-payload.json" ]; then
-            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
-              -H "Content-Type: application/json" \
-              -d @out/nuclei/cloud-payload.json \
-              "https://storescanresults-wrl6y3keaa-ul.a.run.app")
-            
-            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-            BODY=$(echo "$RESPONSE" | sed '$d')
-            
-            if [ "$HTTP_CODE" = "200" ]; then
-              echo "✅ Results uploaded to AttackSimPro Dashboard"
-              echo "$BODY" | jq '.' || echo "$BODY"
-            else
-              echo "⚠️  Upload failed (HTTP $HTTP_CODE)"
-              echo "$BODY"
-            fi
+          # Add template tags if specified
+          if [ -n "${{ github.event.inputs.template_tags }}" ]; then
+            NUCLEI_CMD="$NUCLEI_CMD -tags ${{ github.event.inputs.template_tags }}"
           fi
-      
-      - name: Package evidence
+          
+          echo "Running: $NUCLEI_CMD"
+          eval $NUCLEI_CMD || true
+          
+          # Also generate markdown report
+          nuclei -u ${{ github.event.inputs.target_url }} \
+            -severity ${{ github.event.inputs.severity }} \
+            -markdown-export nuclei-reports/markdown-${{ github.event.inputs.scan_id }} || true
+
+      - name: Parse and summarize results
+        id: parse
         run: |
-          TS="$(date -u +'%Y-%m-%dT%H-%M-%SZ')"
-          zip -r "attacksimpro_nuclei_${TS}.zip" out/nuclei manifests/targets.txt
-      
-      - name: Upload evidence artifact
+          set -euo pipefail
+          sudo apt-get install -y jq
+          
+          JSONL_FILE="nuclei-reports/nuclei-${{ github.event.inputs.scan_id }}.jsonl"
+          
+          if [ -f "$JSONL_FILE" ] && [ -s "$JSONL_FILE" ]; then
+            # Count by severity
+            CRITICAL=$(grep -c '"severity":"critical"' "$JSONL_FILE" 2>/dev/null || echo "0")
+            HIGH=$(grep -c '"severity":"high"' "$JSONL_FILE" 2>/dev/null || echo "0")
+            MEDIUM=$(grep -c '"severity":"medium"' "$JSONL_FILE" 2>/dev/null || echo "0")
+            LOW=$(grep -c '"severity":"low"' "$JSONL_FILE" 2>/dev/null || echo "0")
+            INFO=$(grep -c '"severity":"info"' "$JSONL_FILE" 2>/dev/null || echo "0")
+            TOTAL=$(wc -l < "$JSONL_FILE")
+            
+            echo "critical=$CRITICAL" >> $GITHUB_OUTPUT
+            echo "high=$HIGH" >> $GITHUB_OUTPUT
+            echo "medium=$MEDIUM" >> $GITHUB_OUTPUT
+            echo "low=$LOW" >> $GITHUB_OUTPUT
+            echo "info=$INFO" >> $GITHUB_OUTPUT
+            echo "total=$TOTAL" >> $GITHUB_OUTPUT
+            
+            echo ""
+            echo "🟢 =============================================="
+            echo "🟢 NUCLEI SCAN RESULTS SUMMARY"
+            echo "🟢 =============================================="
+            echo "  💀 Critical:  $CRITICAL"
+            echo "  🔴 High:      $HIGH"
+            echo "  🟠 Medium:    $MEDIUM"
+            echo "  🟡 Low:       $LOW"
+            echo "  ℹ️  Info:      $INFO"
+            echo "  ━━━━━━━━━━━━━━━━━━"
+            echo "  📊 Total:     $TOTAL"
+            echo ""
+            
+            # Show top findings
+            echo "📋 Top Findings:"
+            jq -r 'select(.severity == "critical" or .severity == "high") | "  - [\(.severity | ascii_upcase)] \(.info.name // .template-id)"' "$JSONL_FILE" 2>/dev/null | head -10 || echo "  No critical/high findings"
+            
+          else
+            echo "✅ No vulnerabilities found (or scan produced no output)"
+            echo "critical=0" >> $GITHUB_OUTPUT
+            echo "high=0" >> $GITHUB_OUTPUT
+            echo "medium=0" >> $GITHUB_OUTPUT
+            echo "low=0" >> $GITHUB_OUTPUT
+            echo "info=0" >> $GITHUB_OUTPUT
+            echo "total=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate HTML report
+        run: |
+          JSONL_FILE="nuclei-reports/nuclei-${{ github.event.inputs.scan_id }}.jsonl"
+          HTML_FILE="nuclei-reports/nuclei-${{ github.event.inputs.scan_id }}.html"
+          
+          cat > "$HTML_FILE" << 'HTMLHEAD'
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>AttackSimPro - Nuclei Scan Report</title>
+            <style>
+              body { font-family: Arial, sans-serif; margin: 20px; background: #1a1a2e; color: #eee; }
+              h1 { color: #9d4edd; }
+              .summary { display: flex; gap: 20px; margin: 20px 0; }
+              .stat { padding: 15px 25px; border-radius: 8px; text-align: center; }
+              .critical { background: #7b2cbf; }
+              .high { background: #c1121f; }
+              .medium { background: #f77f00; }
+              .low { background: #fcbf49; color: #333; }
+              .info { background: #4361ee; }
+              .finding { background: #16213e; padding: 15px; margin: 10px 0; border-radius: 8px; border-left: 4px solid #9d4edd; }
+              .finding h3 { margin: 0 0 10px 0; }
+              .severity { padding: 3px 8px; border-radius: 4px; font-size: 12px; }
+              pre { background: #0f0f23; padding: 10px; border-radius: 4px; overflow-x: auto; }
+            </style>
+          </head>
+          <body>
+            <h1>🟢 AttackSimPro - Nuclei Scan Report</h1>
+          HTMLHEAD
+          
+          echo "<p><strong>Target:</strong> ${{ github.event.inputs.target_url }}</p>" >> "$HTML_FILE"
+          echo "<p><strong>Scan ID:</strong> ${{ github.event.inputs.scan_id }}</p>" >> "$HTML_FILE"
+          echo "<p><strong>Client:</strong> ${{ github.event.inputs.client_id }}</p>" >> "$HTML_FILE"
+          echo "<p><strong>Timestamp:</strong> $(date -u '+%Y-%m-%d %H:%M:%S UTC')</p>" >> "$HTML_FILE"
+          
+          echo "<div class='summary'>" >> "$HTML_FILE"
+          echo "<div class='stat critical'><strong>${{ steps.parse.outputs.critical }}</strong><br>Critical</div>" >> "$HTML_FILE"
+          echo "<div class='stat high'><strong>${{ steps.parse.outputs.high }}</strong><br>High</div>" >> "$HTML_FILE"
+          echo "<div class='stat medium'><strong>${{ steps.parse.outputs.medium }}</strong><br>Medium</div>" >> "$HTML_FILE"
+          echo "<div class='stat low'><strong>${{ steps.parse.outputs.low }}</strong><br>Low</div>" >> "$HTML_FILE"
+          echo "<div class='stat info'><strong>${{ steps.parse.outputs.info }}</strong><br>Info</div>" >> "$HTML_FILE"
+          echo "</div>" >> "$HTML_FILE"
+          
+          echo "<h2>Findings</h2>" >> "$HTML_FILE"
+          
+          if [ -f "$JSONL_FILE" ] && [ -s "$JSONL_FILE" ]; then
+            while IFS= read -r line; do
+              NAME=$(echo "$line" | jq -r '.info.name // .template-id // "Unknown"')
+              SEVERITY=$(echo "$line" | jq -r '.severity // "unknown"')
+              MATCHED=$(echo "$line" | jq -r '.matched-at // .host // "N/A"')
+              DESC=$(echo "$line" | jq -r '.info.description // "No description"' | head -c 500)
+              
+              echo "<div class='finding'>" >> "$HTML_FILE"
+              echo "<h3>$NAME <span class='severity $SEVERITY'>$SEVERITY</span></h3>" >> "$HTML_FILE"
+              echo "<p><strong>Matched:</strong> $MATCHED</p>" >> "$HTML_FILE"
+              echo "<p>$DESC</p>" >> "$HTML_FILE"
+              echo "</div>" >> "$HTML_FILE"
+            done < "$JSONL_FILE"
+          else
+            echo "<p>No vulnerabilities found.</p>" >> "$HTML_FILE"
+          fi
+          
+          echo "</body></html>" >> "$HTML_FILE"
+          echo "✅ HTML report generated"
+
+      - name: Upload scan artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: attacksimpro-nuclei
-          path: attacksimpro_nuclei_*.zip
-      
-      - name: 🟣 Scan Complete
-        if: always()
+          name: nuclei-${{ github.event.inputs.scan_id }}
+          path: nuclei-reports/
+          retention-days: 90
+
+      - name: Purple Team Notification - Scan Complete
         run: |
-          echo "════════════════════════════════════════"
-          echo "✅ Nuclei Scan Complete"
-          echo "Critical: ${{ steps.summary.outputs.critical || '0' }}"
-          echo "High: ${{ steps.summary.outputs.high || '0' }}"
-          echo "Medium: ${{ steps.summary.outputs.medium || '0' }}"
-          echo "Dashboard: https://ironcity-attacksimpro.web.app"
-          echo "════════════════════════════════════════"
+          echo ""
+          echo "🟢 =============================================="
+          echo "🟢 NUCLEI SCAN COMPLETE"
+          echo "🟢 =============================================="
+          echo ""
+          echo "📋 Summary:"
+          echo "   Scan ID: ${{ github.event.inputs.scan_id }}"
+          echo "   Target: ${{ github.event.inputs.target_url }}"
+          echo "   Client: ${{ github.event.inputs.client_id }}"
+          echo "   Completed: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo ""
+          echo "📁 Reports available in workflow artifacts"
+          echo ""
+
+      # Optional: Post results to your backend
+      # - name: Post results to AttackSimPro API
+      #   if: ${{ secrets.ATTACKSIMPRO_API_URL }}
+      #   run: |
+      #     curl -X POST "${{ secrets.ATTACKSIMPRO_API_URL }}/api/scans/complete" \
+      #       -H "Authorization: Bearer ${{ secrets.ATTACKSIMPRO_API_KEY }}" \
+      #       -H "Content-Type: application/json" \
+      #       -d '{
+      #         "scan_id": "${{ github.event.inputs.scan_id }}",
+      #         "scan_type": "nuclei",
+      #         "target": "${{ github.event.inputs.target_url }}",
+      #         "client_id": "${{ github.event.inputs.client_id }}",
+      #         "critical": ${{ steps.parse.outputs.critical }},
+      #         "high": ${{ steps.parse.outputs.high }},
+      #         "medium": ${{ steps.parse.outputs.medium }},
+      #         "low": ${{ steps.parse.outputs.low }},
+      #         "info": ${{ steps.parse.outputs.info }}
+      #       }'
