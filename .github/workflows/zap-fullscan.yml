@@ -204,3 +204,36 @@ jobs:
           echo ""
           echo "⚠️  Recommend reviewing WAF/IDS logs for any blocked attacks"
           echo ""
+
+      - name: Post results to AttackSimPro Dashboard
+        if: always()
+        run: |
+          JSON_FILE="zap-reports/zap-fullscan-${{ github.event.inputs.scan_id }}.json"
+          
+          if [ -f "$JSON_FILE" ]; then
+            # Post the full ZAP JSON report with all findings
+            jq --arg scan_id "${{ github.event.inputs.scan_id }}" \
+               --arg scan_type "zap-fullscan" \
+               --arg client_id "${{ github.event.inputs.client_id }}" \
+               '. + {scan_id: $scan_id, scan_type: $scan_type, client_id: $client_id}' \
+               "$JSON_FILE" | \
+            curl -X POST "https://storescanresults-wrl6y3keaa-ul.a.run.app" \
+              -H "Content-Type: application/json" \
+              -d @- || echo "Warning: Failed to post to dashboard"
+          else
+            # Fallback to summary if JSON not available
+            curl -X POST "https://storescanresults-wrl6y3keaa-ul.a.run.app" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "scan_id": "${{ github.event.inputs.scan_id }}",
+                "scan_type": "zap-fullscan",
+                "target_url": "${{ github.event.inputs.target_url }}",
+                "client_id": "${{ github.event.inputs.client_id }}",
+                "summary": {
+                  "high_count": ${{ steps.parse.outputs.high || 0 }},
+                  "medium_count": ${{ steps.parse.outputs.medium || 0 }},
+                  "low_count": ${{ steps.parse.outputs.low || 0 }},
+                  "info_count": ${{ steps.parse.outputs.info || 0 }}
+                }
+              }' || echo "Warning: Failed to post to dashboard"
+          fi
