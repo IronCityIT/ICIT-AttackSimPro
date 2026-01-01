@@ -274,21 +274,60 @@ jobs:
           echo "📁 Reports available in workflow artifacts"
           echo ""
 
-      # Optional: Post results to your backend
-      # - name: Post results to AttackSimPro API
-      #   if: ${{ secrets.ATTACKSIMPRO_API_URL }}
-      #   run: |
-      #     curl -X POST "${{ secrets.ATTACKSIMPRO_API_URL }}/api/scans/complete" \
-      #       -H "Authorization: Bearer ${{ secrets.ATTACKSIMPRO_API_KEY }}" \
-      #       -H "Content-Type: application/json" \
-      #       -d '{
-      #         "scan_id": "${{ github.event.inputs.scan_id }}",
-      #         "scan_type": "nuclei",
-      #         "target": "${{ github.event.inputs.target_url }}",
-      #         "client_id": "${{ github.event.inputs.client_id }}",
-      #         "critical": ${{ steps.parse.outputs.critical }},
-      #         "high": ${{ steps.parse.outputs.high }},
-      #         "medium": ${{ steps.parse.outputs.medium }},
-      #         "low": ${{ steps.parse.outputs.low }},
-      #         "info": ${{ steps.parse.outputs.info }}
-      #       }'
+      - name: Post results to AttackSimPro Dashboard
+        if: always()
+        run: |
+          JSONL_FILE="nuclei-reports/nuclei-${{ github.event.inputs.scan_id }}.jsonl"
+          
+          if [ -f "$JSONL_FILE" ] && [ -s "$JSONL_FILE" ]; then
+            # Convert JSONL to JSON array and post with full findings
+            FINDINGS=$(cat "$JSONL_FILE" | jq -s '.')
+            
+            jq -n \
+              --arg scan_id "${{ github.event.inputs.scan_id }}" \
+              --arg scan_type "nuclei" \
+              --arg target_url "${{ github.event.inputs.target_url }}" \
+              --arg client_id "${{ github.event.inputs.client_id }}" \
+              --argjson critical "${{ steps.parse.outputs.critical || 0 }}" \
+              --argjson high "${{ steps.parse.outputs.high || 0 }}" \
+              --argjson medium "${{ steps.parse.outputs.medium || 0 }}" \
+              --argjson low "${{ steps.parse.outputs.low || 0 }}" \
+              --argjson info "${{ steps.parse.outputs.info || 0 }}" \
+              --argjson findings "$FINDINGS" \
+              '{
+                scan_id: $scan_id,
+                scan_type: $scan_type,
+                target_url: $target_url,
+                client_id: $client_id,
+                summary: {
+                  critical_count: $critical,
+                  high_count: $high,
+                  medium_count: $medium,
+                  low_count: $low,
+                  info_count: $info,
+                  total_findings: ($critical + $high + $medium + $low + $info)
+                },
+                findings: $findings
+              }' | \
+            curl -X POST "https://storescanresults-wrl6y3keaa-ul.a.run.app" \
+              -H "Content-Type: application/json" \
+              -d @- || echo "Warning: Failed to post to dashboard"
+          else
+            # Fallback to summary only
+            curl -X POST "https://storescanresults-wrl6y3keaa-ul.a.run.app" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "scan_id": "${{ github.event.inputs.scan_id }}",
+                "scan_type": "nuclei",
+                "target_url": "${{ github.event.inputs.target_url }}",
+                "client_id": "${{ github.event.inputs.client_id }}",
+                "summary": {
+                  "critical_count": ${{ steps.parse.outputs.critical || 0 }},
+                  "high_count": ${{ steps.parse.outputs.high || 0 }},
+                  "medium_count": ${{ steps.parse.outputs.medium || 0 }},
+                  "low_count": ${{ steps.parse.outputs.low || 0 }},
+                  "info_count": ${{ steps.parse.outputs.info || 0 }}
+                },
+                "findings": []
+              }' || echo "Warning: Failed to post to dashboard"
+          fi
