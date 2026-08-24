@@ -11,12 +11,15 @@ on:
     inputs:
       target_url:
         description: 'Target URL to scan (e.g., https://example.com)'
+        type: string
         required: true
       scan_id:
         description: 'Unique scan identifier from CLI'
+        type: string
         required: true
       client_id:
         description: 'Client identifier for reporting'
+        type: string
         required: false
         default: 'internal'
 
@@ -384,17 +387,19 @@ jobs:
 
       - name: Post results to AttackSimPro Dashboard
         if: always()
+        env:
+          STORE_SCAN_RESULTS_URL: ${{ secrets.STORE_SCAN_RESULTS_URL }}
         run: |
           JSON_FILE="tls-reports/report-${{ github.event.inputs.scan_id }}.json"
           
           if [ -f "$JSON_FILE" ]; then
             # Post the full TLS/Headers JSON report
-            curl -X POST "https://storescanresults-wrl6y3keaa-ul.a.run.app" \
+            curl -X POST "${STORE_SCAN_RESULTS_URL:-https://storescanresults-wrl6y3keaa-ul.a.run.app}" \
               -H "Content-Type: application/json" \
-              -d @"$JSON_FILE" || echo "Warning: Failed to post to dashboard"
+              -d @"$JSON_FILE" || { echo "::error::Failed to post scan results to the dashboard"; exit 1; }
           else
             # Fallback to summary
-            curl -X POST "https://storescanresults-wrl6y3keaa-ul.a.run.app" \
+            curl -X POST "${STORE_SCAN_RESULTS_URL:-https://storescanresults-wrl6y3keaa-ul.a.run.app}" \
               -H "Content-Type: application/json" \
               -d '{
                 "scan_id": "${{ github.event.inputs.scan_id }}",
@@ -407,5 +412,5 @@ jobs:
                   "headers_missing": ${{ steps.headers_check.outputs.headers_missing || 0 }},
                   "cert_days_left": "${{ steps.tls_check.outputs.days_left }}"
                 }
-              }' || echo "Warning: Failed to post to dashboard"
+              }' || { echo "::error::Failed to post scan results to the dashboard"; exit 1; }
           fi

@@ -11,19 +11,24 @@ on:
     inputs:
       target_url:
         description: 'Base URL of the API (e.g., https://api.example.com)'
+        type: string
         required: true
       api_spec_url:
         description: 'URL to OpenAPI/Swagger spec (e.g., https://api.example.com/swagger.json)'
+        type: string
         required: true
       scan_id:
         description: 'Unique scan identifier from CLI'
+        type: string
         required: true
       client_id:
         description: 'Client identifier for reporting'
+        type: string
         required: false
         default: 'internal'
       api_format:
         description: 'API spec format: openapi, soap, or graphql'
+        type: string
         required: false
         default: 'openapi'
 
@@ -31,6 +36,9 @@ on:
 concurrency:
   group: zap-api-${{ github.event.inputs.client_id }}
   cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
   api_scan:
