@@ -53,6 +53,9 @@ env:
   PORTS: ${{ github.event.inputs.target_ports }}
   MODE: ${{ github.event.inputs.exploit_mode }}
 
+permissions:
+  contents: read
+
 jobs:
   # ==========================================================================
   # GUARDRAIL 1: Authorization Check
@@ -638,7 +641,7 @@ jobs:
               "authorized_by": "${{ github.actor }}",
               "status": "completed",
               "timestamp": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'"
-            }' || echo "⚠️ Firebase post failed"
+            }' || { echo "::error::Failed to post results to the dashboard"; exit 1; }
 
       - name: Scan Complete
         run: |

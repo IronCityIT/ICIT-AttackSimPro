@@ -11,26 +11,33 @@ on:
     inputs:
       target_url:
         description: 'Target URL to scan (e.g., https://app.example.com/dashboard)'
+        type: string
         required: true
       login_url:
         description: 'Login page URL (e.g., https://app.example.com/login)'
+        type: string
         required: true
       scan_id:
         description: 'Unique scan identifier from CLI'
+        type: string
         required: true
       client_id:
         description: 'Client identifier for reporting'
+        type: string
         required: true
       username_field:
         description: 'Login form username field name (default: username)'
+        type: string
         required: false
         default: 'username'
       password_field:
         description: 'Login form password field name (default: password)'
+        type: string
         required: false
         default: 'password'
       logged_in_indicator:
         description: 'Regex to detect logged-in state (e.g., "Welcome|Dashboard|Logout")'
+        type: string
         required: false
         default: 'logout|sign.out|log.out'
 
@@ -38,6 +45,9 @@ on:
 concurrency:
   group: zap-auth-${{ github.event.inputs.client_id }}
   cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
   auth_scan:

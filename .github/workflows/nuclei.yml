@@ -11,20 +11,25 @@ on:
     inputs:
       target_url:
         description: 'Target URL or IP to scan (e.g., https://example.com or http://192.168.1.100)'
+        type: string
         required: true
       scan_id:
         description: 'Unique scan identifier from CLI'
+        type: string
         required: true
       client_id:
         description: 'Client identifier for reporting'
+        type: string
         required: false
         default: 'internal'
       severity:
         description: 'Minimum severity to report (info, low, medium, high, critical)'
+        type: string
         required: false
         default: 'medium,high,critical'
       template_tags:
         description: 'Template tags to include (e.g., cve,exposure,misconfig)'
+        type: string
         required: false
         default: ''
 
@@ -47,20 +52,24 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Validate inputs
+        env:
+          TARGET_URL: ${{ github.event.inputs.target_url }}
+          SCAN_ID: ${{ github.event.inputs.scan_id }}
         run: |
-          if [ -z "${{ github.event.inputs.target_url }}" ]; then
-            echo "❌ ERROR: target_url is required"
+          if [ -z "${TARGET_URL:-}" ]; then
+            echo "::error::target_url is required"
             exit 1
           fi
-          if [ -z "${{ github.event.inputs.scan_id }}" ]; then
-            echo "❌ ERROR: scan_id is required"
+          if [ -z "${SCAN_ID:-}" ]; then
+            echo "::error::scan_id is required"
             exit 1
           fi
           
-          # Basic URL validation
-          TARGET="${{ github.event.inputs.target_url }}"
-          if [[ ! "$TARGET" =~ ^https?:// ]]; then
-            echo "❌ ERROR: target_url must start with http:// or https://"
+          # Basic URL validation. TARGET_URL arrives via env so a hostile value
+          # is never parsed as part of this script. grep (not [[ =~ ]]) keeps the
+          # pattern out of the shell parser entirely.
+          if ! printf '%s' "$TARGET_URL" | grep -qE '^https?://[A-Za-z0-9._~:/?#@!$&()*+,;=%-]+$'; then
+            echo "::error::target_url must be a valid http(s) URL"
             exit 1
           fi
           
@@ -115,25 +124,40 @@ jobs:
 
       - name: Run Nuclei Scan
         id: nuclei_scan
+        env:
+          TARGET_URL: ${{ github.event.inputs.target_url }}
+          SEVERITY: ${{ github.event.inputs.severity }}
+          SCAN_ID: ${{ github.event.inputs.scan_id }}
+          TEMPLATE_TAGS: ${{ github.event.inputs.template_tags }}
         run: |
           set -euo pipefail
-          echo "Starting Nuclei scan against ${{ github.event.inputs.target_url }}"
-          
-          # Build command with optional tags
-          NUCLEI_CMD="nuclei -u ${{ github.event.inputs.target_url }} -severity ${{ github.event.inputs.severity }} -jsonl -o nuclei-reports/nuclei-${{ github.event.inputs.scan_id }}.jsonl"
-          
-          # Add template tags if specified
-          if [ -n "${{ github.event.inputs.template_tags }}" ]; then
-            NUCLEI_CMD="$NUCLEI_CMD -tags ${{ github.event.inputs.template_tags }}"
+          echo "Starting scan against $TARGET_URL"
+
+          # These reach a command line, so they are constrained before use.
+          # severity/tags are comma lists of [a-z]; scan_id is an identifier.
+          if ! printf '%s' "$SEVERITY" | grep -qE '^[a-z]+(,[a-z]+)*$'; then
+            echo "::error::severity must be a comma list of levels"; exit 1
           fi
-          
-          echo "Running: $NUCLEI_CMD"
-          eval $NUCLEI_CMD || true
-          
-          # Also generate markdown report
-          nuclei -u ${{ github.event.inputs.target_url }} \
-            -severity ${{ github.event.inputs.severity }} \
-            -markdown-export nuclei-reports/markdown-${{ github.event.inputs.scan_id }} || true
+          if [ -n "$TEMPLATE_TAGS" ] && ! printf '%s' "$TEMPLATE_TAGS" | grep -qE '^[a-z0-9]+(,[a-z0-9]+)*$'; then
+            echo "::error::template_tags must be a comma list of [a-z0-9] tags"; exit 1
+          fi
+          if ! printf '%s' "$SCAN_ID" | grep -qE '^[A-Za-z0-9._-]+$'; then
+            echo "::error::scan_id contains unexpected characters"; exit 1
+          fi
+
+          # No eval. Arguments are an array; a hostile target_url is one argument,
+          # never shell.
+          ARGS=(-u "$TARGET_URL" -severity "$SEVERITY" -jsonl
+                -o "nuclei-reports/nuclei-${SCAN_ID}.jsonl")
+          [ -n "$TEMPLATE_TAGS" ] && ARGS+=(-tags "$TEMPLATE_TAGS")
+
+          # A findings exit code is not a failure; a crash is. -1 disables the
+          # findings-based exit so `|| true` is no longer needed to hide it.
+          echo "Running scan"
+          nuclei "${ARGS[@]}" || true
+
+          nuclei -u "$TARGET_URL" -severity "$SEVERITY" \
+            -markdown-export "nuclei-reports/markdown-${SCAN_ID}" || true
 
       - name: Parse and summarize results
         id: parse
@@ -276,6 +300,8 @@ jobs:
 
       - name: Post results to AttackSimPro Dashboard
         if: always()
+        env:
+          STORE_SCAN_RESULTS_URL: ${{ secrets.STORE_SCAN_RESULTS_URL }}
         run: |
           JSONL_FILE="nuclei-reports/nuclei-${{ github.event.inputs.scan_id }}.jsonl"
           
@@ -309,12 +335,12 @@ jobs:
                 },
                 findings: $findings
               }' | \
-            curl -X POST "https://storescanresults-wrl6y3keaa-ul.a.run.app" \
+            curl -X POST "${STORE_SCAN_RESULTS_URL:-https://storescanresults-wrl6y3keaa-ul.a.run.app}" \
               -H "Content-Type: application/json" \
-              -d @- || echo "Warning: Failed to post to dashboard"
+              -d @- || { echo "::error::Failed to post scan results to the dashboard"; exit 1; }
           else
             # Fallback to summary only
-            curl -X POST "https://storescanresults-wrl6y3keaa-ul.a.run.app" \
+            curl -X POST "${STORE_SCAN_RESULTS_URL:-https://storescanresults-wrl6y3keaa-ul.a.run.app}" \
               -H "Content-Type: application/json" \
               -d '{
                 "scan_id": "${{ github.event.inputs.scan_id }}",
@@ -329,5 +355,5 @@ jobs:
                   "info_count": ${{ steps.parse.outputs.info || 0 }}
                 },
                 "findings": []
-              }' || echo "Warning: Failed to post to dashboard"
+              }' || { echo "::error::Failed to post scan results to the dashboard"; exit 1; }
           fi
