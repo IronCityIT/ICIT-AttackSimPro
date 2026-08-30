@@ -1,0 +1,39 @@
+rules_version = '2';
+
+// Iron City AttackSimPro — multi-tenant Firestore rules.
+//
+// THESE RULES ARE NOT WHAT IS CURRENTLY DEPLOYED, and that is the point of
+// committing them. The live `ironcity-attacksimpro` database answers an
+// unauthenticated GET on /scans with documents, and an unauthenticated DELETE
+// with 200. Any anonymous caller on the internet can read and destroy every
+// client's scan data. Deploying this file closes that.
+//
+// Data is partitioned as clients/{client_id}/scans/{scan_id}. A signed-in user
+// may read only their own client's data, asserted by the `client_id` claim on the
+// Auth0 -> Firebase custom token. Writes come exclusively from storeScanResults
+// via the Admin SDK, which bypasses these rules; client apps have NO write access.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function callerClientId() {
+      return request.auth != null ? request.auth.token.client_id : null;
+    }
+
+    match /clients/{clientId} {
+      allow read: if callerClientId() == clientId;
+      allow write: if false;
+
+      match /scans/{scanId} {
+        allow read: if callerClientId() == clientId;
+        allow write: if false;
+      }
+    }
+
+    // The legacy flat collection the currently-deployed function writes into.
+    // Denied outright rather than left open: nothing should read it once the
+    // partitioned path is live, and until then it must not be world-readable.
+    match /scans/{scanId} {
+      allow read, write: if false;
+    }
+  }
+}

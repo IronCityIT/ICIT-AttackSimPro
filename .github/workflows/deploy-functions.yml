@@ -1,0 +1,86 @@
+name: AttackSimPro - Deploy Functions & Rules
+
+# Deploys storeScanResults and the Firestore rules to this product's OWN project,
+# in us-east5. workflow_dispatch ONLY, and deliberately not on push: the deploy
+# credential does not exist yet, so an automatic trigger would paint main red on
+# every commit for a reason no commit caused.
+#
+# Requires FIREBASE_SERVICE_ACCOUNT on this repository — a service-account JSON key
+# for ironcity-attacksimpro with Cloud Functions Developer, Firebase Rules Admin,
+# Service Account User and Artifact Registry Writer.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Validate credentials and syntax only — do not deploy'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-attacksimpro
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT: ironcity-attacksimpro
+  GCP_REGION: us-east5
+
+jobs:
+  deploy:
+    name: Deploy Functions & Rules
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify deploy credential is present
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SA:-}" ]; then
+            echo "::error::FIREBASE_SERVICE_ACCOUNT is not set on this repository."
+            echo "Provision a service account on ${GCP_PROJECT} with Cloud Functions Developer,"
+            echo "Firebase Rules Admin, Service Account User and Artifact Registry Writer,"
+            echo "then store its JSON key as the FIREBASE_SERVICE_ACCOUNT repo secret."
+            exit 1
+          fi
+          echo "Deploy credential present"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install function dependencies
+        working-directory: functions
+        run: npm install --no-audit --no-fund
+
+      - name: Syntax-check functions
+        working-directory: functions
+        run: node --check index.js
+
+      - name: Write credential
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          python3 -m json.tool "$RUNNER_TEMP/sa.json" > /dev/null
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+
+      - name: Dry run stops here
+        if: inputs.dry_run
+        run: echo "dry_run is true — credential and syntax validated, nothing deployed."
+
+      - name: Deploy functions and Firestore rules
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          npx --yes firebase-tools@13 deploy \
+            --project "$GCP_PROJECT" \
+            --only functions,firestore:rules \
+            --non-interactive --force
