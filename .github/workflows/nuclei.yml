@@ -3,10 +3,15 @@ name: AttackSimPro - Nuclei Scan
 # ============================================================
 # NUCLEI SCAN - Fast vulnerability scanner using templates
 # Scans for CVEs, misconfigurations, exposed panels, etc.
-# Triggered via CLI only - no manual runs without parameters
+# Triggered via CLI, or on the weekly schedule below.
 # ============================================================
 
 on:
+  # Weekly unattended baseline against the org's own estate. A scheduled run
+  # supplies no inputs, so every value is resolved once in the job-level env
+  # block below, where each fallback covers the empty scheduled case.
+  schedule:
+    - cron: '41 6 * * 2'
   workflow_dispatch:
     inputs:
       target_url:
@@ -38,7 +43,7 @@ permissions:
 
 # Only allow one scan at a time per client
 concurrency:
-  group: nuclei-${{ github.event.inputs.client_id }}
+  group: nuclei-${{ github.event.inputs.client_id || 'ironcity' }}
   cancel-in-progress: false
 
 jobs:
@@ -47,14 +52,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
+    # Every input is resolved to an environment variable exactly once, here.
+    # Two reasons: the `|| ...` fallbacks are what let the schedule trigger work
+    # at all (a scheduled run has an empty inputs context), and routing the
+    # values through env keeps them out of the shell parser — previously several
+    # steps interpolated ${{ github.event.inputs.target_url }} straight into a
+    # script body, which is a command-injection sink.
+    env:
+      TARGET_URL: ${{ github.event.inputs.target_url || 'https://ironcityit.com' }}
+      SCAN_ID: ${{ github.event.inputs.scan_id || format('nuclei-scheduled-{0}', github.run_id) }}
+      CLIENT_ID: ${{ github.event.inputs.client_id || 'ironcity' }}
+      SEVERITY: ${{ github.event.inputs.severity || 'medium,high,critical' }}
+      TEMPLATE_TAGS: ${{ github.event.inputs.template_tags || '' }}
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Validate inputs
-        env:
-          TARGET_URL: ${{ github.event.inputs.target_url }}
-          SCAN_ID: ${{ github.event.inputs.scan_id }}
         run: |
           if [ -z "${TARGET_URL:-}" ]; then
             echo "::error::target_url is required"
@@ -74,10 +89,10 @@ jobs:
           fi
           
           echo "✅ Inputs validated"
-          echo "   Target: $TARGET"
-          echo "   Scan ID: ${{ github.event.inputs.scan_id }}"
-          echo "   Client: ${{ github.event.inputs.client_id }}"
-          echo "   Severity: ${{ github.event.inputs.severity }}"
+          echo "   Target: $TARGET_URL"
+          echo "   Scan ID: $SCAN_ID"
+          echo "   Client: $CLIENT_ID"
+          echo "   Severity: $SEVERITY"
 
       - name: Purple Team Notification - Scan Starting
         run: |
@@ -87,10 +102,10 @@ jobs:
           echo ""
           echo "📋 Scan Details:"
           echo "   Type: Nuclei Template Scan"
-          echo "   Target: ${{ github.event.inputs.target_url }}"
-          echo "   Scan ID: ${{ github.event.inputs.scan_id }}"
-          echo "   Client: ${{ github.event.inputs.client_id }}"
-          echo "   Severity Filter: ${{ github.event.inputs.severity }}"
+          echo "   Target: $TARGET_URL"
+          echo "   Scan ID: $SCAN_ID"
+          echo "   Client: $CLIENT_ID"
+          echo "   Severity Filter: $SEVERITY"
           echo "   Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
           echo ""
           echo "📊 Nuclei scans for CVEs, misconfigs, exposed panels, and more."
@@ -124,11 +139,6 @@ jobs:
 
       - name: Run Nuclei Scan
         id: nuclei_scan
-        env:
-          TARGET_URL: ${{ github.event.inputs.target_url }}
-          SEVERITY: ${{ github.event.inputs.severity }}
-          SCAN_ID: ${{ github.event.inputs.scan_id }}
-          TEMPLATE_TAGS: ${{ github.event.inputs.template_tags }}
         run: |
           set -euo pipefail
           echo "Starting scan against $TARGET_URL"
@@ -165,7 +175,7 @@ jobs:
           set -euo pipefail
           sudo apt-get install -y jq
           
-          JSONL_FILE="nuclei-reports/nuclei-${{ github.event.inputs.scan_id }}.jsonl"
+          JSONL_FILE="nuclei-reports/nuclei-${SCAN_ID}.jsonl"
           
           if [ -f "$JSONL_FILE" ] && [ -s "$JSONL_FILE" ]; then
             # Count by severity
@@ -212,8 +222,8 @@ jobs:
 
       - name: Generate HTML report
         run: |
-          JSONL_FILE="nuclei-reports/nuclei-${{ github.event.inputs.scan_id }}.jsonl"
-          HTML_FILE="nuclei-reports/nuclei-${{ github.event.inputs.scan_id }}.html"
+          JSONL_FILE="nuclei-reports/nuclei-${SCAN_ID}.jsonl"
+          HTML_FILE="nuclei-reports/nuclei-${SCAN_ID}.html"
           
           cat > "$HTML_FILE" << 'HTMLHEAD'
           <!DOCTYPE html>
@@ -240,9 +250,9 @@ jobs:
             <h1>🟢 AttackSimPro - Nuclei Scan Report</h1>
           HTMLHEAD
           
-          echo "<p><strong>Target:</strong> ${{ github.event.inputs.target_url }}</p>" >> "$HTML_FILE"
-          echo "<p><strong>Scan ID:</strong> ${{ github.event.inputs.scan_id }}</p>" >> "$HTML_FILE"
-          echo "<p><strong>Client:</strong> ${{ github.event.inputs.client_id }}</p>" >> "$HTML_FILE"
+          echo "<p><strong>Target:</strong> $TARGET_URL</p>" >> "$HTML_FILE"
+          echo "<p><strong>Scan ID:</strong> $SCAN_ID</p>" >> "$HTML_FILE"
+          echo "<p><strong>Client:</strong> $CLIENT_ID</p>" >> "$HTML_FILE"
           echo "<p><strong>Timestamp:</strong> $(date -u '+%Y-%m-%d %H:%M:%S UTC')</p>" >> "$HTML_FILE"
           
           echo "<div class='summary'>" >> "$HTML_FILE"
@@ -278,7 +288,7 @@ jobs:
       - name: Upload scan artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: nuclei-${{ github.event.inputs.scan_id }}
+          name: nuclei-${{ env.SCAN_ID }}
           path: nuclei-reports/
           retention-days: 90
 
@@ -290,9 +300,9 @@ jobs:
           echo "🟢 =============================================="
           echo ""
           echo "📋 Summary:"
-          echo "   Scan ID: ${{ github.event.inputs.scan_id }}"
-          echo "   Target: ${{ github.event.inputs.target_url }}"
-          echo "   Client: ${{ github.event.inputs.client_id }}"
+          echo "   Scan ID: $SCAN_ID"
+          echo "   Target: $TARGET_URL"
+          echo "   Client: $CLIENT_ID"
           echo "   Completed: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
           echo ""
           echo "📁 Reports available in workflow artifacts"
@@ -301,59 +311,71 @@ jobs:
       - name: Post results to AttackSimPro Dashboard
         if: always()
         env:
-          STORE_SCAN_RESULTS_URL: ${{ secrets.STORE_SCAN_RESULTS_URL }}
+          # The default is this product's own deployed storeScanResults endpoint
+          # in us-east5. The secret overrides it where one is configured.
+          STORE_URL_SECRET: ${{ secrets.STORE_SCAN_RESULTS_URL }}
+          STORE_URL_DEFAULT: https://us-east5-ironcity-attacksimpro.cloudfunctions.net/storeScanResults
+          CRITICAL: ${{ steps.parse.outputs.critical || 0 }}
+          HIGH: ${{ steps.parse.outputs.high || 0 }}
+          MEDIUM: ${{ steps.parse.outputs.medium || 0 }}
+          LOW: ${{ steps.parse.outputs.low || 0 }}
+          INFO: ${{ steps.parse.outputs.info || 0 }}
         run: |
-          JSONL_FILE="nuclei-reports/nuclei-${{ github.event.inputs.scan_id }}.jsonl"
-          
+          set -euo pipefail
+          STORE_URL="${STORE_URL_SECRET:-$STORE_URL_DEFAULT}"
+          JSONL_FILE="nuclei-reports/nuclei-${SCAN_ID}.jsonl"
+
           if [ -f "$JSONL_FILE" ] && [ -s "$JSONL_FILE" ]; then
-            # Convert JSONL to JSON array and post with full findings
-            FINDINGS=$(cat "$JSONL_FILE" | jq -s '.')
-            
-            jq -n \
-              --arg scan_id "${{ github.event.inputs.scan_id }}" \
-              --arg scan_type "nuclei" \
-              --arg target_url "${{ github.event.inputs.target_url }}" \
-              --arg client_id "${{ github.event.inputs.client_id }}" \
-              --argjson critical "${{ steps.parse.outputs.critical || 0 }}" \
-              --argjson high "${{ steps.parse.outputs.high || 0 }}" \
-              --argjson medium "${{ steps.parse.outputs.medium || 0 }}" \
-              --argjson low "${{ steps.parse.outputs.low || 0 }}" \
-              --argjson info "${{ steps.parse.outputs.info || 0 }}" \
-              --argjson findings "$FINDINGS" \
-              '{
-                scan_id: $scan_id,
-                scan_type: $scan_type,
-                target_url: $target_url,
-                client_id: $client_id,
-                summary: {
-                  critical_count: $critical,
-                  high_count: $high,
-                  medium_count: $medium,
-                  low_count: $low,
-                  info_count: $info,
-                  total_findings: ($critical + $high + $medium + $low + $info)
-                },
-                findings: $findings
-              }' | \
-            curl -X POST "${STORE_SCAN_RESULTS_URL:-https://storescanresults-wrl6y3keaa-ul.a.run.app}" \
-              -H "Content-Type: application/json" \
-              -d @- || { echo "::error::Failed to post scan results to the dashboard"; exit 1; }
+            FINDINGS=$(jq -s '.' "$JSONL_FILE")
           else
-            # Fallback to summary only
-            curl -X POST "${STORE_SCAN_RESULTS_URL:-https://storescanresults-wrl6y3keaa-ul.a.run.app}" \
-              -H "Content-Type: application/json" \
-              -d '{
-                "scan_id": "${{ github.event.inputs.scan_id }}",
-                "scan_type": "nuclei",
-                "target_url": "${{ github.event.inputs.target_url }}",
-                "client_id": "${{ github.event.inputs.client_id }}",
-                "summary": {
-                  "critical_count": ${{ steps.parse.outputs.critical || 0 }},
-                  "high_count": ${{ steps.parse.outputs.high || 0 }},
-                  "medium_count": ${{ steps.parse.outputs.medium || 0 }},
-                  "low_count": ${{ steps.parse.outputs.low || 0 }},
-                  "info_count": ${{ steps.parse.outputs.info || 0 }}
-                },
-                "findings": []
-              }' || { echo "::error::Failed to post scan results to the dashboard"; exit 1; }
+            FINDINGS='[]'
           fi
+
+          # Both branches build the payload the same way. The summary-only
+          # branch used to hand-splice values into a JSON string literal, which
+          # produced malformed JSON the moment a value contained a quote.
+          jq -n \
+            --arg scan_id "$SCAN_ID" \
+            --arg scan_type "nuclei" \
+            --arg target_url "$TARGET_URL" \
+            --arg client_id "$CLIENT_ID" \
+            --argjson critical "$CRITICAL" \
+            --argjson high "$HIGH" \
+            --argjson medium "$MEDIUM" \
+            --argjson low "$LOW" \
+            --argjson info "$INFO" \
+            --argjson findings "$FINDINGS" \
+            '{
+              scan_id: $scan_id,
+              scan_type: $scan_type,
+              target_url: $target_url,
+              target: $target_url,
+              client_id: $client_id,
+              status: "completed",
+              summary: {
+                critical_count: $critical,
+                high_count: $high,
+                medium_count: $medium,
+                low_count: $low,
+                info_count: $info,
+                total_findings: ($critical + $high + $medium + $low + $info)
+              },
+              findings: $findings
+            }' > payload.json
+
+          # Validation gate: the payload is the only contract with the store.
+          [ "$(head -c 1 payload.json)" = "{" ] || {
+            echo "::error::payload.json does not start with {"; exit 1; }
+          python3 -m json.tool payload.json > /dev/null
+
+          # curl exits 0 on an HTTP 500, so the previous `|| { ... }` guard never
+          # fired on a rejected store and a failed write was reported as green.
+          HTTP_CODE=$(curl -sS -o response.txt -w '%{http_code}' -X POST "$STORE_URL" \
+            -H "Content-Type: application/json" \
+            --data @payload.json)
+          echo "storeScanResults responded HTTP $HTTP_CODE"
+          cat response.txt || true
+          case "$HTTP_CODE" in
+            2*) echo "Results stored for scan_id=$SCAN_ID" ;;
+            *)  echo "::error::store POST rejected (HTTP $HTTP_CODE)"; exit 1 ;;
+          esac
