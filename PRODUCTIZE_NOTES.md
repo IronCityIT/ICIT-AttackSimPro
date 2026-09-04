@@ -137,3 +137,30 @@ architecture items in §2 before any live run.
 now satisfied for all 7. Gaps (b) trigger function and (c) dashboard→function wiring were
 **not audited in depth** here because the store-layer and consensus decisions in §2 gate
 them; they should be revisited once those land.
+
+---
+
+# Runnable / production-quality pass (2026-09-04)
+
+Branch: `productize/attacksimpro-runnable`. **Tier: REVIEW ONLY** — branch + PR only,
+no merge/deploy/live-dispatch. Defensive scope: offensive/active-scan workflow logic
+was **not** modified.
+
+Focus of this pass was making the product *genuinely runnable and verifiable*, not a
+re-audit of the workflows (those flags in §2 above still stand for Bill).
+
+- **Core functional defect fixed:** the dashboard read `collection('scans')` ordered by
+  `timestamp` and field `target_url`, but the ingest function writes
+  `clients/{client_id}/scans/{scan_id}` with `created_at`/`target`. The client-facing
+  surface could therefore never show a real scan. Dashboard now reads the correct
+  partition (`?client=<id>`), orders by `created_at`, resolves `target`, and shows a
+  LIVE/DEMO banner.
+- **Ingest hardened + made testable:** logic extracted to a pure `functions/handler.js`
+  (size cap, status allow-list, `scan_id` format, findings cap, optional ingest-token
+  gate, request-id/`/healthz` observability); `index.js` is now a thin production shell.
+- **Verification added and run:** 16 `node:test` unit tests + `scripts/smoke.sh`
+  end-to-end HTTP smoke test (both green), `Dockerfile`/`docker-compose.yml`/`Makefile`
+  for reproducible local runs.
+- **Remaining blocker:** Auth0→Firebase custom-token (`client_id` claim) is required
+  before a live dashboard read passes `firestore.rules`; needs tenant secrets. Details
+  and evidence in `docs/SDLC_STATUS.md`.
