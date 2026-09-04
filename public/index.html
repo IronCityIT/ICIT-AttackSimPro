@@ -369,16 +369,42 @@ if(name.includes(k))return v;
 return['NIST ID.RA-1'];
 }
 
-try{firebase.initializeApp(firebaseConfig);db=firebase.firestore();loadDashboard()}catch(e){loadDemoData()}
+// Multi-tenant: the dashboard renders exactly one client's data, chosen by
+// ?client=<client_id> (matching the client_id partition the ingest function
+// writes). No client => demo mode. Cross-tenant reads are impossible by
+// construction here and are additionally denied by firestore.rules.
+function getClientId(){
+try{return (new URLSearchParams(location.search).get('client')||'').trim();}catch(e){return '';}
+}
+const CLIENT_ID=getClientId();
+
+// Small, honest data-source banner so a client never mistakes demo data for a
+// real scan. 'live' = data read from Firestore; 'demo' = built-in sample set.
+function setDataSource(mode,detail){
+let el=document.getElementById('data-source-banner');
+if(!el){el=document.createElement('div');el.id='data-source-banner';
+el.style.cssText='position:fixed;bottom:12px;right:12px;z-index:9999;padding:6px 12px;border-radius:8px;font-size:.72rem;font-weight:600;letter-spacing:1px;border:1px solid';
+document.body.appendChild(el);}
+if(mode==='live'){el.style.background='rgba(46,213,115,.15)';el.style.borderColor='#2ed573';el.style.color='#2ed573';el.textContent='LIVE · '+(detail||CLIENT_ID);}
+else{el.style.background='rgba(255,165,2,.15)';el.style.borderColor='#ffa502';el.style.color='#ffa502';el.textContent='DEMO DATA'+(detail?' · '+detail:'');}
+console.info('[AttackSimPro] data source:',mode,detail||'');
+}
+
+try{firebase.initializeApp(firebaseConfig);db=firebase.firestore();loadDashboard()}catch(e){setDataSource('demo','init failed');loadDemoData()}
 
 async function loadDashboard(){
+if(!CLIENT_ID){setDataSource('demo','no ?client= selected');loadDemoData();return}
 try{
-const snap=await db.collection('scans').orderBy('timestamp','desc').limit(20).get();
+// Read the client's own partition: clients/{client_id}/scans, newest first.
+// The ingest function writes created_at (server timestamp) — order by it.
+const snap=await db.collection('clients').doc(CLIENT_ID).collection('scans')
+.orderBy('created_at','desc').limit(20).get();
 const scans=[];
 snap.forEach(d=>scans.push({id:d.id,...d.data()}));
-if(!scans.length){loadDemoData();return}
+if(!scans.length){setDataSource('demo','no scans for '+CLIENT_ID);loadDemoData();return}
+setDataSource('live',CLIENT_ID+' · '+scans.length+' scans');
 processScans(scans);
-}catch(e){loadDemoData()}
+}catch(e){setDataSource('demo','read blocked/error');console.warn('[AttackSimPro] live read failed:',e&&e.message);loadDemoData()}
 }
 
 function processScans(scans){
@@ -390,7 +416,7 @@ tH+=(sum.critical_count||0)+(sum.high_count||0);
 tM+=sum.medium_count||0;
 tL+=sum.low_count||0;
 tI+=sum.info_count||0;
-(s.findings||[]).forEach(f=>allFindings.push({...f,target:s.target_url}));
+(s.findings||[]).forEach(f=>allFindings.push({...f,target:f.target||s.target||s.target_url}));
 });
 document.getElementById('high-count').textContent=tH;
 document.getElementById('medium-count').textContent=tM;
