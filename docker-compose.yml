@@ -1,0 +1,31 @@
+# Reproducible local stack for AttackSimPro.
+#
+#   docker compose up --build
+#     ingest    -> http://127.0.0.1:8088   (storeScanResults, in-memory Firestore)
+#     dashboard -> http://127.0.0.1:8080   (static Firebase-hosting content)
+#
+# This stack is for local development, smoke tests and demos only. It does NOT
+# touch GCP/Firebase and stores nothing durably. Production deploys go through
+# .github/workflows/deploy-functions.yml (Cloud Functions + Firestore rules).
+services:
+  ingest:
+    build:
+      context: ./functions
+    image: attacksimpro-ingest-local
+    ports:
+      - "8088:8088"
+    environment:
+      # Uncomment to exercise the optional shared-secret ingest gate locally:
+      # INGEST_TOKEN: "local-dev-token"
+      PORT: "8088"
+    restart: unless-stopped
+
+  dashboard:
+    image: python:3.12-alpine
+    working_dir: /site
+    volumes:
+      - ./public:/site:ro
+    command: ["python", "-m", "http.server", "8080"]
+    ports:
+      - "8080:8080"
+    restart: unless-stopped

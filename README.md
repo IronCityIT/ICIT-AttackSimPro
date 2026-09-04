@@ -63,4 +63,41 @@ See: `DISCLAIMER.md` and `docs/scope/` for scope and usage rules.
 
 ## Repo Layout
 
-``
+```
+functions/            storeScanResults ingest (Cloud Function)
+  handler.js          pure, dependency-injected request handler (all logic)
+  index.js            production shell: firebase-admin + Cloud Functions wiring
+  local-server.js     zero-dependency local HTTP server (in-memory Firestore)
+  testkit/            in-memory Firestore + req/res doubles (test/local only)
+  test/               deterministic unit tests (node:test)
+  Dockerfile          reproducible local ingest container
+public/index.html     Firebase-hosted purple-team dashboard
+firestore.rules       multi-tenant read rules (clients/{client_id}/scans)
+scripts/smoke.sh      end-to-end ingest smoke test (curl)
+.github/workflows/    scan workflows + deploy-functions (workflow_dispatch)
+docs/SDLC_STATUS.md   current build status, evidence, and blockers
+```
+
+## Running Locally
+
+No GCP credentials, no deploy, no network egress are required for local runs; the
+local server runs the exact production handler against an in-memory Firestore double.
+
+```bash
+make check            # lint + 16 unit tests + end-to-end smoke test
+make serve-ingest     # storeScanResults on http://127.0.0.1:8088
+make serve-dashboard  # dashboard on http://127.0.0.1:8080
+docker compose up --build   # ingest (:8088) + dashboard (:8080), containerized
+```
+
+Open the dashboard for a specific tenant with `?client=<client_id>`, e.g.
+`http://127.0.0.1:8080/index.html?client=acme-corp`. Without a client it renders
+built-in demo data (shown by a DEMO banner). Post a scan result to the local ingest:
+
+```bash
+curl -X POST http://127.0.0.1:8088/ -H 'Content-Type: application/json' \
+  -d '{"client_name":"Acme Corp","scan_id":"scan-1","target":"https://acme.example",
+       "status":"completed","findings":[{"name":"Missing HSTS","risk":"medium"}]}'
+```
+
+See `docs/SDLC_STATUS.md` for build status, test evidence, and open blockers.
