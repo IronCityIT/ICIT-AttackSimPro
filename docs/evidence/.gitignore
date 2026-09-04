@@ -1,0 +1,2 @@
+# Keep evidence logs under version control (override root *.log ignore).
+!*.log
