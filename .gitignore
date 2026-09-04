@@ -1,0 +1,10 @@
+# Dependencies
+node_modules/
+functions/node_modules/
+
+# Logs / local runtime artifacts
+*.log
+npm-debug.log*
+
+# OS / editor cruft
+.DS_Store

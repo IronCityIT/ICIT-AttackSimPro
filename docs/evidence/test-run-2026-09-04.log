@@ -1,0 +1,112 @@
+AttackSimPro — full test campaign  (2026-09-04T20:42:45Z)
+host: node v22.23.2, python Python 3.12.3, Linux x86_64
+
+########## BUILD: npm install ##########
+firebase-admin@12.7.0 installed; production deps load:
+  OK: firebase-admin + firebase-functions require cleanly
+
+########## LINT ##########
+  node --check: index.js, handler.js, local-server.js OK
+
+########## UNIT + INTEGRATION + E2E (node:test) ##########
+ok 1 - compliance mapping resolves known finding categories
+ok 2 - remediation lookup returns actionable guidance
+ok 3 - demo fallback populates findings when no client is selected
+ok 4 - client id is parsed from the query string
+ok 5 - live read maps stored records (target field) into findings
+# failure report ignored — scan already completed { request_id: 'mtnf878t-r4moyo', client_id: 'acme', scan_id: 's3' }
+# failed to store scan result { request_id: 'mtnf87b3-xpm5j2', message: 'boom' }
+ok 6 - toClientId slugs names into a stable, path-safe id
+ok 7 - rejects non-POST with 405
+ok 8 - healthz returns ok
+ok 9 - requires client_id
+ok 10 - requires scan_id
+ok 11 - rejects malformed scan_id
+ok 12 - rejects an unknown status
+ok 13 - stores a completed scan under clients/{id}/scans/{id} and keeps the real target
+ok 14 - maps legacy target_url onto target
+ok 15 - status is monotonic: a late failure never downgrades a completed scan
+ok 16 - created_at is preserved across updates
+ok 17 - rejects a payload over the size cap with 413
+ok 18 - rejects too many findings with 413
+ok 19 - ingest token gate: rejects without a matching token
+ok 20 - returns 500 when the store throws
+ok 21 - approxByteLength handles unserializable bodies
+ok 22 - healthz is live over HTTP
+ok 23 - token gate rejects an unauthenticated POST (401)
+ok 24 - full store round-trip with a valid token + request id header
+ok 25 - monotonic status holds over HTTP: late failure does not downgrade
+# tests 25
+# pass 25
+# fail 0
+
+########## RUNTIME SMOKE (HTTP, curl) ##########
+AttackSimPro storeScanResults — smoke test @ http://127.0.0.1:8091
+  PASS healthz is up (200)
+  PASS GET / rejected (405)
+  PASS missing client rejected (400)
+  PASS missing scan_id rejected (400)
+  PASS bad status rejected (400)
+  PASS valid scan stored (200)
+  PASS late failure ignored (200)
+  PASS stored scan retained completed status
+  PASS stored scan retained real target
+
+Results: 9 passed, 0 failed
+
+########## SAFE SYNTHETIC ATTACK SIMULATION (local targets only) ##########
+== 1. Passive header scans of synthetic targets ==
+  PASS vulnerable target scanned + stored
+  PASS hardened target scanned + stored
+  PASS vulnerable target produced 6 findings
+  PASS hardened target produced 0 findings
+== 2. Verify stored partition + retained target ==
+  PASS vuln scan stored at correct partition with real target
+  PASS findings persisted on the record
+== 3. Adversarial probes against the ingest attack surface (defensive) ==
+  PASS path-traversal scan_id rejected (400)
+  PASS oversized payload rejected (413)
+  PASS invalid status rejected (400)
+  PASS hostile finding string accepted as inert data (200)
+
+Simulation results: 10 passed, 0 failed
+
+########## SAMPLE SCAN PAYLOAD (vulnerable synthetic target) ##########
+{
+  "scan_type": "web-header-baseline",
+  "target": "http://127.0.0.1:9101",
+  "summary": {
+    "http_status": 200,
+    "critical_count": 0,
+    "high_count": 0,
+    "medium_count": 3,
+    "low_count": 2,
+    "info_count": 1
+  },
+  "findings": [
+    "Missing HSTS",
+    "Missing Content-Security-Policy",
+    "Missing X-Frame-Options",
+    "Missing X-Content-Type-Options",
+    "Server Disclosure",
+    "Cookie Without Secure Flag"
+  ]
+}
+
+########## AUTH / CONFIG CHECKS ##########
+[secret scan] no hardcoded private keys/tokens (${SCAN_PASSWORD} is an env-var placeholder, not a literal).
+[firebase web apiKey] present in dashboard — public-by-design for the Firebase Web SDK; access is gated by firestore.rules + Auth, not by the key.
+[workflow secrets] referenced by name only:
+    secrets.FIREBASE_FUNCTION_URL
+    secrets.FIREBASE_SERVICE_ACCOUNT
+    secrets.STORE_SCAN_RESULTS_URL
+[firestore.rules] world read/write on legacy /scans denied; clients/{cid}/scans readable only with a matching client_id auth claim:
+    3 explicit deny rules present
+[hosting headers] after this change:
+    X-Content-Type-Options
+    X-Frame-Options
+    Referrer-Policy
+    Strict-Transport-Security
+    Content-Security-Policy
+[ingest token gate] verified over HTTP (401 without token, 200 with) — tests 19,23,24.
+[CORS] storeScanResults sets cors:false (no browser cross-origin; server-to-server workflow callers only).
