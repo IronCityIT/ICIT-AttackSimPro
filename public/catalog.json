@@ -1,0 +1,181 @@
+{
+  "version": 1,
+  "groups": [
+    "quick",
+    "standard",
+    "deep",
+    "compliance"
+  ],
+  "scenarios": [
+    {
+      "name": "cookie_hardening",
+      "title": "Session Cookie Hardening",
+      "description": "Checks Set-Cookie for Secure, HttpOnly, and SameSite attributes.",
+      "target_kinds": [
+        "url",
+        "domain",
+        "hostname",
+        "ip"
+      ],
+      "groups": [
+        "standard",
+        "compliance"
+      ],
+      "attack": [
+        "T1539"
+      ],
+      "safe": true
+    },
+    {
+      "name": "cors_policy",
+      "title": "Cross-Origin Policy",
+      "description": "Detects over-permissive CORS (wildcard origin with credentials).",
+      "target_kinds": [
+        "url",
+        "domain",
+        "hostname",
+        "ip"
+      ],
+      "groups": [
+        "standard",
+        "deep"
+      ],
+      "attack": [
+        "T1190"
+      ],
+      "safe": true
+    },
+    {
+      "name": "directory_listing",
+      "title": "Directory Listing Exposure",
+      "description": "Detects server directory autoindex pages that leak file structure.",
+      "target_kinds": [
+        "url",
+        "domain",
+        "hostname",
+        "ip"
+      ],
+      "groups": [
+        "deep"
+      ],
+      "attack": [
+        "T1083"
+      ],
+      "safe": true
+    },
+    {
+      "name": "http_methods",
+      "title": "HTTP Method Hygiene",
+      "description": "Inspects advertised HTTP methods for risky verbs (via OPTIONS).",
+      "target_kinds": [
+        "url",
+        "domain",
+        "hostname",
+        "ip"
+      ],
+      "groups": [
+        "standard",
+        "deep"
+      ],
+      "attack": [
+        "T1190"
+      ],
+      "safe": true
+    },
+    {
+      "name": "open_ports",
+      "title": "Exposed Service Surface",
+      "description": "Connect-probes a fixed set of ports that should not be public.",
+      "target_kinds": [
+        "hostname",
+        "ip",
+        "domain"
+      ],
+      "groups": [
+        "deep"
+      ],
+      "attack": [
+        "T1046"
+      ],
+      "safe": true
+    },
+    {
+      "name": "security_headers",
+      "title": "Web Security Baseline",
+      "description": "Validates that standard HTTP security response headers are enforced.",
+      "target_kinds": [
+        "url",
+        "domain",
+        "hostname",
+        "ip"
+      ],
+      "groups": [
+        "quick",
+        "standard",
+        "compliance"
+      ],
+      "attack": [
+        "T1190"
+      ],
+      "safe": true
+    },
+    {
+      "name": "sensitive_paths",
+      "title": "Sensitive Path Exposure",
+      "description": "Checks whether well-known sensitive paths are reachable.",
+      "target_kinds": [
+        "url",
+        "domain",
+        "hostname",
+        "ip"
+      ],
+      "groups": [
+        "standard",
+        "deep"
+      ],
+      "attack": [
+        "T1595.003"
+      ],
+      "safe": true
+    },
+    {
+      "name": "server_disclosure",
+      "title": "Software Version Exposure",
+      "description": "Detects server/software version banners that aid fingerprinting.",
+      "target_kinds": [
+        "url",
+        "domain",
+        "hostname",
+        "ip"
+      ],
+      "groups": [
+        "quick",
+        "standard"
+      ],
+      "attack": [
+        "T1592.002"
+      ],
+      "safe": true
+    },
+    {
+      "name": "tls_posture",
+      "title": "Transport Security Posture",
+      "description": "Validates TLS version and certificate validity via a handshake.",
+      "target_kinds": [
+        "url",
+        "domain",
+        "hostname",
+        "ip"
+      ],
+      "groups": [
+        "standard",
+        "deep",
+        "compliance"
+      ],
+      "attack": [
+        "T1040"
+      ],
+      "safe": true
+    }
+  ]
+}

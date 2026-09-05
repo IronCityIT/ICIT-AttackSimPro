@@ -1,0 +1,197 @@
+name: AttackSimPro - Safe Simulation
+
+# Authorized, non-destructive Purple-Team control validation.
+#
+# Two ways in:
+#   * schedule  — a weekly SANDBOX self-validation: runs the engine test suite and the
+#                 loopback end-to-end simulation inside the runner. No external target,
+#                 no AI, no store. This is a safety net, not a client scan.
+#   * dispatch  — an operator-driven run against an authorized target. The engine's
+#                 scope gate refuses any non-loopback/private host unless allow_external
+#                 is set AND a committed authorization record matches. Findings are then
+#                 enriched by the shared AI consensus engine and stored via
+#                 storeScanResults (clients/{client_id}/scans/{scan_id}).
+#
+# REVIEW ONLY tier: committed via PR, never auto-run against a client. A live dispatch
+# requires an authorized target + a signed ROE that this repo does not carry.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Domain, URL, or IP to validate (authorized targets only)'
+        required: true
+        type: string
+      client_name:
+        description: 'Client identifier'
+        required: true
+        type: string
+      scan_id:
+        description: 'Unique scan identifier'
+        required: false
+        type: string
+      scenario_group:
+        description: 'Scenario group preset'
+        required: false
+        type: choice
+        options: [quick, standard, deep, compliance]
+        default: standard
+      allow_external:
+        description: 'Permit an authorized non-loopback target (requires a matching authorizations/ record)'
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    - cron: '0 6 * * 1'  # Mondays 06:00 UTC — sandbox self-validation only
+
+permissions:
+  contents: read
+
+concurrency:
+  group: asp-sim-${{ github.event.inputs.client_name || 'sandbox' }}
+  cancel-in-progress: false
+
+jobs:
+  self_validation:
+    name: Sandbox self-validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+      - name: Engine unit/integration/security tests
+        run: python -m unittest discover -s simcore/tests -p 'test_*.py'
+      - name: Node ingest tests
+        working-directory: functions
+        run: npm install --no-audit --no-fund && npm test
+      - name: End-to-end sandbox simulation (loopback fixtures)
+        run: bash scripts/e2e/simulation_e2e.sh
+
+  simulate:
+    name: Authorized simulation
+    if: github.event_name == 'workflow_dispatch'
+    needs: self_validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      findings_b64: ${{ steps.run.outputs.findings_b64 }}
+      client_id: ${{ steps.run.outputs.client_id }}
+      scan_id: ${{ steps.run.outputs.scan_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+      - name: Run authorized simulation
+        id: run
+        env:
+          TARGET: ${{ github.event.inputs.target }}
+          CLIENT_NAME: ${{ github.event.inputs.client_name }}
+          SCAN_ID: ${{ github.event.inputs.scan_id }}
+          GROUP: ${{ github.event.inputs.scenario_group }}
+          ALLOW_EXTERNAL: ${{ github.event.inputs.allow_external }}
+        run: |
+          set -euo pipefail
+          SCAN_ID="${SCAN_ID:-asp-$(date +%s)}"
+          EXTRA=()
+          if [ "${ALLOW_EXTERNAL}" = "true" ]; then EXTRA+=(--allow-external); fi
+          # The scope gate (simcore/scope.py) enforces authorization; a refused
+          # target exits non-zero here and fails the run before any AI/store step.
+          python -m simcore run \
+            --targets "$TARGET" \
+            --group "$GROUP" \
+            --client "$CLIENT_NAME" \
+            --scan-id "$SCAN_ID" \
+            --out "evidence/$SCAN_ID" \
+            --audit-log "evidence/audit.log" \
+            "${EXTRA[@]}"
+          FINDINGS_B64=$(base64 -w0 < "evidence/$SCAN_ID/findings.json")
+          CLIENT_ID=$(python -c "import json;print(json.load(open('evidence/$SCAN_ID/run.json'))['client_id'])")
+          {
+            echo "findings_b64=$FINDINGS_B64"
+            echo "client_id=$CLIENT_ID"
+            echo "scan_id=$SCAN_ID"
+          } >> "$GITHUB_OUTPUT"
+      - name: Upload evidence bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-${{ steps.run.outputs.scan_id }}
+          path: evidence/
+          retention-days: 30
+
+  ai_consensus:
+    name: AI Consensus Analysis
+    if: github.event_name == 'workflow_dispatch'
+    needs: simulate
+    uses: IronCityIT/consensus-engine/.github/workflows/analyze.yml@main
+    with:
+      findings_json: ${{ needs.simulate.outputs.findings_b64 }}
+      product: attacksimpro
+      client_id: ${{ needs.simulate.outputs.client_id }}
+      scan_id: ${{ needs.simulate.outputs.scan_id }}
+      post_to_api: false
+    secrets: inherit
+
+  store:
+    name: Store validated results
+    if: github.event_name == 'workflow_dispatch'
+    needs: [simulate, ai_consensus]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Store findings + consensus
+        env:
+          STORE_URL: ${{ secrets.STORE_SCAN_RESULTS_URL }}
+          INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
+          FINDINGS_B64: ${{ needs.simulate.outputs.findings_b64 }}
+          CONSENSUS_B64: ${{ needs.ai_consensus.outputs.consensus_b64 }}
+          CLIENT_ID: ${{ needs.simulate.outputs.client_id }}
+          SCAN_ID: ${{ needs.simulate.outputs.scan_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${STORE_URL:-}" ]; then
+            echo "::error::STORE_SCAN_RESULTS_URL is not set — cannot store results."
+            exit 1
+          fi
+          echo "$FINDINGS_B64" | base64 -d > findings.json
+          CONSENSUS='null'
+          if [ -n "${CONSENSUS_B64:-}" ]; then
+            echo "$CONSENSUS_B64" | base64 -d > consensus.json
+            CONSENSUS=$(cat consensus.json)
+          fi
+          python - "$CLIENT_ID" "$SCAN_ID" <<'PY' > payload.json
+          import json, sys
+          client_id, scan_id = sys.argv[1], sys.argv[2]
+          findings = json.load(open("findings.json"))
+          try:
+              consensus = json.load(open("consensus.json"))
+          except FileNotFoundError:
+              consensus = None
+          counts = {f"{s}_count": 0 for s in ("critical","high","medium","low","info")}
+          for f in findings:
+              k = f"{str(f.get('severity','info')).lower()}_count"
+              if k in counts: counts[k] += 1
+          print(json.dumps({
+              "client_id": client_id, "client_name": client_id, "scan_id": scan_id,
+              "scan_type": "purple-team-validation", "status": "completed",
+              "summary": counts, "findings": findings, "consensus": consensus,
+          }))
+          PY
+          CODE=$(curl -s -o resp.json -w '%{http_code}' -X POST "$STORE_URL" \
+            -H 'Content-Type: application/json' \
+            ${INGEST_TOKEN:+-H "X-Ingest-Token: $INGEST_TOKEN"} \
+            --data-binary @payload.json)
+          echo "store responded $CODE"; cat resp.json || true
+          if [ "$CODE" -lt 200 ] || [ "$CODE" -ge 300 ]; then
+            echo "::error::store rejected the results ($CODE)"; exit 1
+          fi

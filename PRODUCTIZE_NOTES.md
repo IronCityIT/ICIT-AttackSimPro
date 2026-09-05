@@ -137,3 +137,89 @@ architecture items in §2 before any live run.
 now satisfied for all 7. Gaps (b) trigger function and (c) dashboard→function wiring were
 **not audited in depth** here because the store-layer and consensus decisions in §2 gate
 them; they should be revisited once those land.
+
+---
+
+# Runnable / production-quality pass (2026-09-04)
+
+Branch: `productize/attacksimpro-runnable`. **Tier: REVIEW ONLY** — branch + PR only,
+no merge/deploy/live-dispatch. Defensive scope: offensive/active-scan workflow logic
+was **not** modified.
+
+Focus of this pass was making the product *genuinely runnable and verifiable*, not a
+re-audit of the workflows (those flags in §2 above still stand for Bill).
+
+- **Core functional defect fixed:** the dashboard read `collection('scans')` ordered by
+  `timestamp` and field `target_url`, but the ingest function writes
+  `clients/{client_id}/scans/{scan_id}` with `created_at`/`target`. The client-facing
+  surface could therefore never show a real scan. Dashboard now reads the correct
+  partition (`?client=<id>`), orders by `created_at`, resolves `target`, and shows a
+  LIVE/DEMO banner.
+- **Ingest hardened + made testable:** logic extracted to a pure `functions/handler.js`
+  (size cap, status allow-list, `scan_id` format, findings cap, optional ingest-token
+  gate, request-id/`/healthz` observability); `index.js` is now a thin production shell.
+- **Verification added and run:** 16 `node:test` unit tests + `scripts/smoke.sh`
+  end-to-end HTTP smoke test (both green), `Dockerfile`/`docker-compose.yml`/`Makefile`
+  for reproducible local runs.
+- **Remaining blocker:** Auth0→Firebase custom-token (`client_id` claim) is required
+  before a live dashboard read passes `firestore.rules`; needs tenant secrets. Details
+  and evidence in `docs/SDLC_STATUS.md`.
+
+---
+
+# Full-feature productization pass (2026-09-04)
+
+Branch: `productize/attacksimpro-fullfeature`. **Tier: REVIEW ONLY** — branch + PR
+only, no merge/deploy/live-dispatch. Defensive scope: no offensive/exploit logic was
+added; `metasploit.yml` and the active-scan workflow bodies were **not** modified.
+Full acceptance criteria + gap matrix in `docs/ACCEPTANCE_CRITERIA.md`; proven-vs-
+blocked report in `STATUS.md`; evidence in `docs/evidence/fullfeature-run-2026-09-04.log`.
+
+## What was built (`simcore/`)
+
+A modular, authorized, non-destructive Purple-Team **simulation engine**, mirroring the
+shared ICIT `module_framework` pattern (one capability = one module, a registry that
+drives both CLI and dashboard):
+
+- **Engine** — `base.py` (SimulationScenario/Finding/ScenarioResult), `registry.py`
+  (discover/select/catalog), `runner.py` (orchestration), `net.py` (the only network
+  surface; inspection-only GET/HEAD/OPTIONS, connect-only TCP, handshake-only TLS).
+- **Scenario library** — 9 scenarios in `simcore/scenarios/`, each MITRE ATT&CK-mapped
+  and safe by construction: security headers, server/version disclosure, cookie
+  hardening, TLS posture, sensitive-path exposure, exposed ports, HTTP-method hygiene,
+  CORS policy, directory listing. The old `scripts/attack-sim/passive_header_scan.py`
+  logic is **re-housed** here (not dropped) as `security_headers` + `cookie_hardening`
+  + `server_disclosure`.
+- **Authorization / scope** — `scope.py` + `authorizations/`. Two guards, both required
+  for any non-sandbox target: an explicit `--allow-external` opt-in AND a matching,
+  in-window authorization (ROE) record. Loopback/private ranges are the always-allowed
+  sandbox. The repo ships **zero** live external authorizations (only a `.sample`).
+- **Evidence** — `evidence.py`: run.json + findings.json + report.md/html + a SHA-256
+  `manifest.json`; `verify_bundle()` detects any tamper.
+- **Reporting** — `reporting.py`: white-labeled Markdown + HTML, fully output-encoded.
+- **Remediation** — `remediation.py`: shared catalog (steps, priority/effort, framework
+  refs), exported to `public/remediation.json` for the dashboard.
+- **RBAC + audit** — `rbac.py` (viewer/operator/admin) and `audit.py` (append-only,
+  hash-chained, tamper-evident).
+- **Scheduling** — `scheduler.py` (dependency-free 5-field cron, next-run, plan);
+  `schedule.example.yaml`. Scheduling only decides *when*; execution still passes the
+  RBAC + scope gate.
+- **CLI** — `python -m simcore {list,catalog,remediation,run,verify,report,schedule}`.
+
+## Wiring + CI
+
+- **Consensus engine** — `.github/workflows/simulation.yml` routes findings through
+  `IronCityIT/consensus-engine/.github/workflows/analyze.yml@main` via `workflow_call`
+  (inputs `findings_json`/`product`/`client_id`/`scan_id`/`post_to_api:false`, output
+  `consensus_b64`), then stores findings + consensus via `storeScanResults`. This closes
+  flag §2A for the safe path (the offensive workflows remain flagged, unchanged).
+- **Jenkins** — `Jenkinsfile` runs the full gate (lint → unit/integration/security →
+  ingest tests → smoke → E2E → security gate → build artifacts).
+- **Dashboard** — a Scenario Library section rendered from `public/catalog.json` (the
+  engine registry), output-encoded.
+
+## Verified
+
+115 automated checks green (65 engine + 25 ingest + 9 smoke + 16 E2E). Two defects
+found and fixed this pass (E1 hardened-fixture path fidelity; E2 all-refused exit code).
+Live consensus/Jenkins/Firestore/Auth0 remain BLOCKED on secrets — see `STATUS.md`.

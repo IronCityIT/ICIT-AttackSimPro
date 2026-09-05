@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+functions/node_modules/
+
+# Logs / local runtime artifacts
+*.log
+npm-debug.log*
+
+# OS / editor cruft
+.DS_Store
+
+# Generated evidence bundles (runtime artifacts)
+evidence/
+build/
+__pycache__/
+*.pyc

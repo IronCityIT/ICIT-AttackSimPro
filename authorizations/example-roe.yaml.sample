@@ -1,0 +1,11 @@
+# TEMPLATE — not loaded (suffix .sample). Copy to <name>.yaml to activate.
+roe_id: ROE-2026-EXAMPLE-01
+client: Example Corp
+authorized_by: ciso@example.com
+hosts:
+  - scan.example.com
+cidrs:
+  - 198.51.100.0/24
+not_before: 2026-09-01T00:00:00Z
+not_after: 2026-12-31T23:59:59Z
+reason: Authorized purple-team control validation (signed SOW reference here)

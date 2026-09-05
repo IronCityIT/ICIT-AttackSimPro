@@ -1,0 +1,5 @@
+# AttackSimPro simulation engine (simcore) runtime dependencies.
+#
+# The engine is stdlib-only at its core. PyYAML is the single optional dependency,
+# used to read YAML authorization records and schedule files (JSON works without it).
+PyYAML>=6.0
