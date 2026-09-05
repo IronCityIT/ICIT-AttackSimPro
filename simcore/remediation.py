@@ -141,6 +141,20 @@ CATALOG: dict[str, dict[str, Any]] = {
         "effort": "Low",
         "frameworks": ["OWASP A05", "NIST SC-8"],
     },
+    "adversary-technique-unprevented": {
+        "title": "Adversary technique executed without prevention",
+        "impact": "An emulated ATT&CK technique ran on the host without being blocked, "
+        "indicating a detection or prevention gap for that technique.",
+        "steps": [
+            "Confirm endpoint/network controls generate an alert for this ATT&CK technique.",
+            "Tune detections (EDR/SIEM) to cover the technique, then re-run the emulation.",
+            "Where feasible, add a preventive control (application control, egress policy).",
+            "Track the technique in the coverage matrix until detection is confirmed.",
+        ],
+        "priority": "High",
+        "effort": "Medium",
+        "frameworks": ["MITRE ATT&CK", "NIST DE.CM", "CIS 8", "SOC2 CC7.2"],
+    },
     "missing-permissions-policy": {
         "title": "Permissions-Policy not set",
         "impact": "Powerful browser features (camera, geolocation) are not "

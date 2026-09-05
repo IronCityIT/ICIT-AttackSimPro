@@ -123,6 +123,46 @@ def run(
     return run_doc
 
 
+def build_ingest_run(
+    findings: list[Any],
+    *,
+    client_name: str,
+    scan_id: str,
+    scan_type: str = "adversary-emulation",
+    source: str = "",
+    coverage: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a run doc from already-collected findings (adapter ingestion path).
+
+    Produces the same shape as :func:`run` so evidence, reporting, audit, and the
+    ingest client all work unchanged. ``findings`` may be Finding objects or dicts.
+    """
+    from collections import Counter
+
+    dict_findings = [f.to_dict() if hasattr(f, "to_dict") else dict(f) for f in findings]
+    targets = sorted({str(f.get("target")) for f in dict_findings if f.get("target")})
+    sev_counts = Counter(str(f.get("severity", "info")).lower() for f in dict_findings)
+    return {
+        "client_id": _client_id(client_name),
+        "client_name": client_name,
+        "scan_id": scan_id,
+        "scan_type": scan_type,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "targets": targets,
+        "requested_targets": targets,
+        "refusals": [],
+        "authorization": "ingested report (executed under a prior authorization)",
+        "source": source,
+        "scenario_count": 1,
+        "scenario_results": [],
+        "findings": dict_findings,
+        "coverage": coverage or {},
+        "summary": {f"{s}_count": sev_counts.get(s, 0)
+                    for s in ("critical", "high", "medium", "low", "info")},
+        "status": "completed",
+    }
+
+
 def write_evidence_bundle(run_doc: dict[str, Any], out_dir: str | Path) -> dict[str, Any]:
     """Persist run.json, findings.json, report.md/html, and a signed manifest."""
     d = Path(out_dir)

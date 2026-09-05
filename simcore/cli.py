@@ -34,6 +34,13 @@ def _cmd_list(args) -> int:
     for s in cat["scenarios"]:
         print(f"{s['name']:<20} {','.join(s['groups']):<28} {','.join(s['attack'])}")
         print(f"  {s['title']} — {s['description']}")
+    from simcore.adapters import registry as adapter_registry
+
+    adapters = adapter_registry.catalog()
+    if adapters:
+        print("\nReport adapters (python -m simcore ingest --adapter <name>):")
+        for a in adapters:
+            print(f"  {a['name']:<18} {a['title']} — {a['description']}")
     return 0
 
 
@@ -110,6 +117,51 @@ def _cmd_run(args) -> int:
     return 0
 
 
+def _cmd_ingest(args) -> int:
+    from simcore.adapters import registry as adapter_registry
+
+    try:
+        adapter = adapter_registry.get(args.adapter)
+    except KeyError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    with open(args.file, encoding="utf-8") as fh:
+        data = json.load(fh)
+    findings = adapter.parse(data, target_label=args.target_label or "")
+    coverage = adapter.coverage(data) if hasattr(adapter, "coverage") else {}
+
+    run_doc = runner.build_ingest_run(
+        findings, client_name=args.client, scan_id=args.scan_id,
+        scan_type=args.scan_type, source=args.adapter, coverage=coverage,
+    )
+
+    audit = AuditLog(args.audit_log) if args.audit_log else None
+    if audit:
+        audit.append(args.actor, args.role, "ingest_results", args.scan_id,
+                     {"adapter": args.adapter, "findings": len(run_doc["findings"])})
+
+    if args.out:
+        manifest = runner.write_evidence_bundle(run_doc, args.out)
+        print(f"evidence bundle -> {args.out} (digest {manifest['bundle_digest'][:12]}…)",
+              file=sys.stderr)
+
+    print(json.dumps({
+        "scan_id": run_doc["scan_id"], "client_id": run_doc["client_id"],
+        "scan_type": run_doc["scan_type"], "findings": len(run_doc["findings"]),
+        "summary": run_doc["summary"],
+        "coverage": {"executed": coverage.get("executed", 0),
+                     "prevented": coverage.get("prevented", 0)},
+    }, indent=2))
+
+    if args.post:
+        token = os.environ.get("INGEST_TOKEN", "")
+        code, body = ingest_client.post(args.post, run_doc, token=token)
+        print(f"POST {args.post} -> {code}: {body}", file=sys.stderr)
+        if not (200 <= code < 300):
+            return 1
+    return 0
+
+
 def _cmd_verify(args) -> int:
     ok, problems = evidence.verify_bundle(args.bundle)
     if ok:
@@ -163,6 +215,20 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--fail-on-findings", action="store_true",
                    help="exit non-zero if any high/critical finding")
     r.set_defaults(fn=_cmd_run)
+
+    ing = sub.add_parser("ingest", help="ingest an adversary-emulation report into findings")
+    ing.add_argument("--adapter", required=True, help="report adapter id (e.g. caldera)")
+    ing.add_argument("--file", required=True, help="operation report JSON file")
+    ing.add_argument("--client", required=True)
+    ing.add_argument("--scan-id", required=True)
+    ing.add_argument("--scan-type", default="adversary-emulation")
+    ing.add_argument("--target-label", help="label for hosts missing one in the report")
+    ing.add_argument("--out", help="evidence bundle output dir")
+    ing.add_argument("--post", help="storeScanResults URL to POST findings to")
+    ing.add_argument("--audit-log", help="append-only audit log path")
+    ing.add_argument("--actor", default="cli")
+    ing.add_argument("--role", default="operator")
+    ing.set_defaults(fn=_cmd_ingest)
 
     v = sub.add_parser("verify", help="verify an evidence bundle")
     v.add_argument("--bundle", required=True)
