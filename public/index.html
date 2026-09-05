@@ -160,6 +160,16 @@ input[type=checkbox]{width:18px;height:18px;accent-color:var(--purple);cursor:po
 .finding-header .compliance-tags,.finding-header .finding-target{display:none}
 .models-grid{grid-template-columns:repeat(auto-fit,minmax(100px,1fr))}
 }
+.scenario-section{margin:24px 0}
+.scenario-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
+.scenario-card{background:rgba(0,0,0,.3);border:1px solid var(--border);border-radius:12px;padding:16px;transition:border-color .2s}
+.scenario-card:hover{border-color:var(--purple)}
+.scenario-card .name{color:var(--gold);font-weight:600;font-size:.95rem;margin-bottom:4px}
+.scenario-card .desc{color:var(--muted);font-size:.8rem;line-height:1.5;margin-bottom:10px}
+.scenario-card .tags{display:flex;flex-wrap:wrap;gap:6px}
+.scenario-card .tag{font-size:.65rem;padding:2px 8px;border-radius:10px;background:rgba(157,78,221,.15);color:var(--purple);font-weight:600}
+.scenario-card .tag.attack{background:rgba(212,175,55,.15);color:var(--gold)}
+.scenario-card .tag.safe{background:rgba(46,213,115,.15);color:var(--low)}
 </style>
 </head>
 <body>
@@ -230,6 +240,13 @@ input[type=checkbox]{width:18px;height:18px;accent-color:var(--purple);cursor:po
 <div class="compliance-badge"><h4>OWASP</h4><p>Top 10</p><div class="compliance-count" id="owasp-count">--</div></div>
 <div class="compliance-badge"><h4>ISO 27001</h4><p>Info Security</p><div class="compliance-count" id="iso-count">--</div></div>
 <div class="compliance-badge"><h4>CMMC</h4><p>Defense</p><div class="compliance-count" id="cmmc-count">--</div></div>
+</div></section>
+
+<section class="scenario-section"><div class="card"><div class="card-header"><h2>🧪 Simulation Scenario Library</h2><div class="card-actions"><span id="scenario-meta" style="color:var(--muted);font-size:.8rem"></span></div></div>
+<p style="color:var(--muted);font-size:.85rem;margin:0 0 14px">Non-destructive, authorized control-validation scenarios. Every run is gated by a scope/authorization policy and recorded in a tamper-evident audit trail. This library is generated from the engine's own registry — the same source of truth the CLI uses.</p>
+<div class="scenario-grid" id="scenario-grid">
+<div style="text-align:center;padding:24px;color:var(--muted)">Loading scenario library…</div>
+</div>
 </div></section>
 
 <section class="findings-section"><div class="card"><div class="card-header"><h2>🔍 Security Findings with AI Remediation</h2><div class="card-actions">
@@ -391,6 +408,36 @@ console.info('[AttackSimPro] data source:',mode,detail||'');
 }
 
 try{firebase.initializeApp(firebaseConfig);db=firebase.firestore();loadDashboard()}catch(e){setDataSource('demo','init failed');loadDemoData()}
+renderScenarioLibrary();
+
+// Output-encode any value before it reaches innerHTML.
+function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+
+// Scenario library is generated from the engine registry (public/catalog.json) — the
+// same source of truth the CLI uses, so UI and CLI can never drift.
+async function renderScenarioLibrary(){
+const grid=document.getElementById('scenario-grid');
+if(!grid)return;
+try{
+const res=await fetch('catalog.json',{cache:'no-store'});
+if(!res.ok)throw new Error('catalog '+res.status);
+const cat=await res.json();
+const scenarios=cat.scenarios||[];
+document.getElementById('scenario-meta').textContent=scenarios.length+' scenarios · groups: '+(cat.groups||[]).join(', ');
+grid.innerHTML=scenarios.map(s=>`
+<div class="scenario-card">
+<div class="name">${esc(s.title)}</div>
+<div class="desc">${esc(s.description)}</div>
+<div class="tags">
+${(s.groups||[]).map(g=>'<span class="tag">'+esc(g)+'</span>').join('')}
+${(s.attack||[]).map(a=>'<span class="tag attack">'+esc(a)+'</span>').join('')}
+${s.safe?'<span class="tag safe">non-destructive</span>':''}
+</div>
+</div>`).join('');
+}catch(e){
+grid.innerHTML='<div style="padding:16px;color:var(--muted)">Scenario library unavailable ('+esc(e.message)+').</div>';
+}
+}
 
 async function loadDashboard(){
 if(!CLIENT_ID){setDataSource('demo','no ?client= selected');loadDemoData();return}
