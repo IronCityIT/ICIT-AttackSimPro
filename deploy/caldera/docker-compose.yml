@@ -1,0 +1,36 @@
+# Adversary-emulation orchestrator (MITRE CALDERA) — DigitalOcean ASP host.
+#
+# DESCRIBED, NOT APPLIED. This compose is the proposed provisioning for the dedicated
+# ASP host. Do NOT `docker compose up` this from CI or an agent — Bill applies it on the
+# authorized host. Nothing here runs in ephemeral GitHub Actions runners.
+#
+# Safety posture:
+#   * The orchestrator UI/API binds to LOOPBACK ONLY (127.0.0.1). Reach it through an
+#     SSH tunnel or the host's authenticated reverse proxy — it is never exposed to the
+#     internet, and it is never default-on. It runs only for an authorized engagement.
+#   * Credentials come from a .env file on the host (names only below; never commit values).
+#   * Operation reports are written to ./reports and ingested by
+#     `python -m simcore ingest --adapter caldera` — the product never executes emulation
+#     from this repo; it consumes the report this host produces.
+
+services:
+  adversary-emulation:
+    image: ghcr.io/mitre/caldera:latest   # pin to a digest before applying (Bill)
+    container_name: asp-adversary-emulation
+    restart: unless-stopped
+    # Loopback bind only — not published to 0.0.0.0.
+    ports:
+      - "127.0.0.1:8888:8888"
+    environment:
+      # By NAME only. Set real values in an on-host .env, never in git.
+      - CALDERA_API_KEY_RED=${CALDERA_API_KEY_RED}
+      - CALDERA_API_KEY_BLUE=${CALDERA_API_KEY_BLUE}
+      - CALDERA_ADMIN_PASSWORD=${CALDERA_ADMIN_PASSWORD}
+    volumes:
+      - ./conf:/usr/src/app/conf:ro       # host-managed config (auth, plugins)
+      - ./reports:/usr/src/app/reports    # operation reports land here for ingestion
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8888/"]
+      interval: 30s
+      timeout: 5s
+      retries: 5

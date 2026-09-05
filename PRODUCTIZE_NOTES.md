@@ -223,3 +223,51 @@ drives both CLI and dashboard):
 115 automated checks green (65 engine + 25 ingest + 9 smoke + 16 E2E). Two defects
 found and fixed this pass (E1 hardened-fixture path fidelity; E2 all-refused exit code).
 Live consensus/Jenkins/Firestore/Auth0 remain BLOCKED on secrets — see `STATUS.md`.
+
+---
+
+# ASP tool expansion — #1 Adversary-Emulation Orchestrator (CALDERA) (2026-09-05)
+
+Task: `ASP-TOOL-EXPANSION.md` (PR-only, non-prod integration branch, never `main`,
+never deploy). Branch: `productize/asp-caldera` → PR base `integration/asp-bas-expansion`.
+**No live offensive scan was run.** Internal tool name: MITRE CALDERA; white-labeled as
+"Automated Adversary Emulation" on every client-facing surface.
+
+**What it adds (one module/tool per PR).** A *report-ingest adapter*, not a live runner:
+`simcore/adapters/caldera.py` parses a CALDERA operation report into normalized Iron City
+findings tagged with MITRE ATT&CK technique ids. A successfully-executed (unprevented)
+ability becomes a detection/prevention-gap finding (severity by ATT&CK tactic); a
+blocked/failed ability is counted as coverage, not a finding. `coverage()` returns the
+executed-vs-prevented technique matrix.
+
+- New: `simcore/adapters/{base,registry,caldera}.py`, `runner.build_ingest_run`,
+  remediation key `adversary-technique-unprevented`, CLI `ingest` subcommand,
+  `deploy/caldera/` (compose + host README, **described not applied**).
+- Reuses the existing pipeline unchanged: evidence bundle + manifest, report, audit,
+  `storeScanResults` ingest client.
+
+**Why ingest, not execute.** ASP is live/sacred and this session must not run live
+offensive scans. Emulation runs on the authorized DigitalOcean ASP host under a signed
+ROE; the product consumes the resulting report. This keeps zero offensive execution in
+the repo/CI while still delivering ATT&CK coverage + findings to the dashboard.
+
+**ATT&CK coverage delta.** Adds an adversary-emulation coverage path (per-technique
+executed/prevented) on top of the passive/active control-validation scenarios from the
+full-feature build. Techniques are data-driven from the report (e.g. T1003, T1018, T1057
+in the test fixture), so coverage grows with the operations the host runs.
+
+**Auth requirements.** Gated: runs only per-engagement with signed authorization
+(consistent with existing Empire/Veil/Metasploit posture). Orchestrator binds loopback
+only; not default-on.
+
+**Infra needs (left for Bill).** Provision the DO host + firewall (no public 8888), pin
+the image digest, create the on-host `.env` (`CALDERA_API_KEY_RED/BLUE`,
+`CALDERA_ADMIN_PASSWORD` — names only), wire `STORE_SCAN_RESULTS_URL`/`INGEST_TOKEN`.
+
+**Verified.** 76 engine checks green (65 prior + 11 adapter). CLI `ingest` produces a
+verified evidence bundle from the sample report. No `caldera` string appears in findings
+(white-label test). Live orchestrator run + storeScanResults POST remain BLOCKED (host +
+secrets), as intended.
+
+**Next in order:** Stratus Red Team → MAAD-AF → PurpleSharp → RTA/Invoke-Atomic →
+Infection Monkey → VECTR → flightsim (gated C2/lateral-movement last, only if greenlit).

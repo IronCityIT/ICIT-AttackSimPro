@@ -1,0 +1,4 @@
+# On-host, never committed
+.env
+conf/
+reports/

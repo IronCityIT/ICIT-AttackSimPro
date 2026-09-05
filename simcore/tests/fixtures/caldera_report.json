@@ -1,0 +1,44 @@
+{
+  "name": "Discovery + Credential Access (authorized engagement)",
+  "start": "2026-09-05T14:00:00Z",
+  "finish": "2026-09-05T14:12:00Z",
+  "host_group": [
+    {"paw": "win01paw", "host": "WIN-01", "platform": "windows"},
+    {"paw": "srv02paw", "host": "SRV-02", "platform": "windows"}
+  ],
+  "steps": {
+    "win01paw": {
+      "steps": [
+        {
+          "link_id": "l1", "name": "Process Discovery", "host": "WIN-01",
+          "status": 0,
+          "attack": {"tactic": "discovery", "technique_id": "T1057", "technique_name": "Process Discovery"}
+        },
+        {
+          "link_id": "l2", "name": "OS Credential Dumping", "host": "WIN-01",
+          "status": 0,
+          "attack": {"tactic": "credential-access", "technique_id": "T1003", "technique_name": "OS Credential Dumping"}
+        },
+        {
+          "link_id": "l3", "name": "Cleanup command", "host": "WIN-01",
+          "status": 0,
+          "attack": {"tactic": "", "technique_id": "", "technique_name": ""}
+        }
+      ]
+    },
+    "srv02paw": {
+      "steps": [
+        {
+          "link_id": "l4", "name": "Remote System Discovery", "host": "SRV-02",
+          "status": 0,
+          "attack": {"tactic": "discovery", "technique_id": "T1018", "technique_name": "Remote System Discovery"}
+        },
+        {
+          "link_id": "l5", "name": "Remote Services", "host": "SRV-02",
+          "status": 1,
+          "attack": {"tactic": "lateral-movement", "technique_id": "T1021", "technique_name": "Remote Services"}
+        }
+      ]
+    }
+  }
+}
