@@ -1,0 +1,34 @@
+AttackSimPro full-feature build — verification run
+Date: 2026-09-05T02:04:09Z
+Branch: productize/attacksimpro-fullfeature
+Python: Python 3.12.3  Node: v22.23.2
+
+===== simcore engine test suite (unit + integration + security) =====
+.................................................................
+----------------------------------------------------------------------
+Ran 65 tests in 2.843s
+
+OK
+
+===== ingest unit tests (node:test) =====
+# failure report ignored — scan already completed { request_id: 'mtnqp270-nwylwc', client_id: 'acme', scan_id: 's3' }
+# failed to store scan result { request_id: 'mtnqp27c-qqftr1', message: 'boom' }
+# tests 25
+# pass 25
+# fail 0
+
+===== ingest smoke (curl) =====
+  [0;32mPASS[0m stored scan retained real target
+
+Results: 9 passed, 0 failed
+
+===== end-to-end sandbox simulation =====
+  [0;32mPASS[0m report has no unescaped script payload
+
+E2E results: 16 passed, 0 failed
+
+===== scenario catalog =====
+cookie_hardening cors_policy directory_listing http_methods open_ports security_headers sensitive_paths server_disclosure tls_posture 
+
+===== default posture: external authorizations loaded (must be 0) =====
+0
