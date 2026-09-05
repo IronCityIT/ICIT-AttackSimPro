@@ -53,6 +53,12 @@ class HardHandler(http.server.BaseHTTPRequestHandler):
         return "server"  # suppress version disclosure
 
     def do_GET(self):
+        # A hardened server does not expose arbitrary paths; only "/" is served.
+        if self.path.split("?", 1)[0] != "/":
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
         self.send_header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
