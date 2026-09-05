@@ -1,0 +1,20 @@
+# Example AttackSimPro schedule. `python -m simcore schedule --file schedule.example.yaml`
+# prints the next run for each entry. Scheduling only decides WHEN — every run still
+# passes RBAC + the scope/authorization gate at execution time.
+schedules:
+  - name: nightly-sandbox-baseline
+    cron: "0 2 * * *"          # 02:00 daily
+    group: standard
+    client_name: Acme Corp
+    targets:
+      - http://127.0.0.1:9101  # sandbox fixture
+    role: operator
+    enabled: true
+
+  - name: weekly-deep-sandbox
+    cron: "0 3 * * 0"          # 03:00 Sundays
+    group: deep
+    client_name: Acme Corp
+    targets:
+      - http://127.0.0.1:9101
+    enabled: true
