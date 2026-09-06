@@ -194,6 +194,26 @@ CATALOG: dict[str, dict[str, Any]] = {
         "effort": "Medium",
         "frameworks": ["MITRE ATT&CK", "NIST DE.CM", "CIS Microsoft 365", "SOC2 CC7.2"],
     },
+    "endpoint-technique-undetected": {
+        "title": "Endpoint attack technique simulated without confirmed detection",
+        "impact": "An ATT&CK technique was executed on the endpoint to generate telemetry, "
+        "but the detection for it was not confirmed to fire. If the endpoint/SIEM stack "
+        "stayed silent, real adversary use of this technique would go unnoticed on the "
+        "host.",
+        "steps": [
+            "Confirm the EDR and SIEM raised an alert for this technique at the time of "
+            "the simulation; if not, it is a detection gap.",
+            "Verify the required telemetry source is on and shipped (Sysmon / Windows "
+            "audit policy / PowerShell script-block logging / command-line auditing).",
+            "Author or tune a detection rule for the technique, then re-run the "
+            "simulation to confirm the alert fires end to end.",
+            "Track the technique in the detection coverage matrix until the alert is "
+            "verified.",
+        ],
+        "priority": "High",
+        "effort": "Medium",
+        "frameworks": ["MITRE ATT&CK", "NIST DE.CM", "CIS 8", "SOC2 CC7.2"],
+    },
     "missing-permissions-policy": {
         "title": "Permissions-Policy not set",
         "impact": "Powerful browser features (camera, geolocation) are not "
