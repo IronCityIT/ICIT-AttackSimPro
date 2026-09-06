@@ -155,6 +155,23 @@ CATALOG: dict[str, dict[str, Any]] = {
         "effort": "Medium",
         "frameworks": ["MITRE ATT&CK", "NIST DE.CM", "CIS 8", "SOC2 CC7.2"],
     },
+    "cloud-technique-detonated": {
+        "title": "Cloud attack technique detonated without confirmed detection",
+        "impact": "An emulated ATT&CK cloud technique executed against the tenant. If the "
+        "cloud-native detection stack did not alert, adversary activity of this class "
+        "would go unnoticed.",
+        "steps": [
+            "Confirm the cloud-native detection service (GuardDuty / Defender for Cloud / "
+            "Security Command Center) generated an alert for this technique.",
+            "Ensure control-plane audit logging (CloudTrail / Activity Log / Cloud Audit "
+            "Logs) is enabled and centrally collected.",
+            "Add or tune a detection rule for the technique, then re-run the emulation.",
+            "Track the technique in the cloud coverage matrix until detection is confirmed.",
+        ],
+        "priority": "High",
+        "effort": "Medium",
+        "frameworks": ["MITRE ATT&CK", "NIST DE.CM", "CIS Cloud", "SOC2 CC7.2"],
+    },
     "missing-permissions-policy": {
         "title": "Permissions-Policy not set",
         "impact": "Powerful browser features (camera, geolocation) are not "

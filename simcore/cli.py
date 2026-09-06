@@ -145,12 +145,14 @@ def _cmd_ingest(args) -> int:
         print(f"evidence bundle -> {args.out} (digest {manifest['bundle_digest'][:12]}…)",
               file=sys.stderr)
 
+    # Each adapter reports coverage in its own shape (CALDERA: executed/prevented;
+    # Stratus: detonated/not_run) — print the counts it provides, not a fixed schema.
+    coverage_counts = {k: v for k, v in coverage.items() if isinstance(v, int)}
     print(json.dumps({
         "scan_id": run_doc["scan_id"], "client_id": run_doc["client_id"],
         "scan_type": run_doc["scan_type"], "findings": len(run_doc["findings"]),
         "summary": run_doc["summary"],
-        "coverage": {"executed": coverage.get("executed", 0),
-                     "prevented": coverage.get("prevented", 0)},
+        "coverage": coverage_counts,
     }, indent=2))
 
     if args.post:

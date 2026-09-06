@@ -271,3 +271,41 @@ secrets), as intended.
 
 **Next in order:** Stratus Red Team → MAAD-AF → PurpleSharp → RTA/Invoke-Atomic →
 Infection Monkey → VECTR → flightsim (gated C2/lateral-movement last, only if greenlit).
+
+---
+
+# ASP tool expansion — #2 Cloud Attack Simulation (Stratus Red Team) (2026-09-06)
+
+Task: `ASP-TOOL-EXPANSION.md` #2. Branch: `productize/asp-stratus` (stacked on
+`productize/asp-caldera`, which carries the adapter framework from PR #6) → PR base
+`productize/asp-caldera`. **No live detonation was run.** Internal tool: Stratus Red Team;
+white-labeled as "Cloud Attack Simulation".
+
+**What it adds.** A report-ingest adapter (`simcore/adapters/stratus.py`) that normalizes
+a Stratus results JSON into ATT&CK-tagged findings for AWS/Azure/GCP/K8s. A *detonated*
+technique becomes a detection/prevention-gap finding (severity by ATT&CK tactic); a
+non-detonated (cold) or metadata-only entry is skipped. `coverage()` returns
+detonated/not_run + per-platform counts. Robust to Stratus' PascalCase/lowercase keys and
+list/`{results:[…]}` shapes.
+
+- New: `simcore/adapters/stratus.py`, remediation key `cloud-technique-detonated`
+  (ATT&CK / NIST DE.CM / CIS Cloud / SOC2), `deploy/stratus/` (Dockerfile + README,
+  **described not built**), 13 adapter tests + fixture.
+- CLI `ingest --adapter stratus` reuses the evidence/report/audit/store pipeline; the
+  coverage line now prints each adapter's own shape.
+
+**Safety / auth.** Detonation runs only against a **disposable cloud sandbox** under a
+signed ROE (never a client production tenant); gated, not default-on; credentials scoped
+to the sandbox, by name only. The product ingests the results file — zero detonation in
+repo/CI.
+
+**White-label fix found this pass:** the evidence key was initially `stratus_id`, leaking
+the tool name into stored findings; renamed to `technique_ref` (caught by the white-label
+test).
+
+**Verified.** 89 engine checks green (76 prior + 13 Stratus). Full local gate green
+(89 engine + 25 ingest + 9 smoke + 16 E2E). Live runner + storeScanResults POST remain
+BLOCKED (sandbox account + secrets), as intended.
+
+**Next in order:** MAAD-AF → PurpleSharp → RTA/Invoke-Atomic → Infection Monkey → VECTR →
+flightsim.
