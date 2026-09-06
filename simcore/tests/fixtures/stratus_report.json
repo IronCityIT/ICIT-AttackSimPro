@@ -1,0 +1,39 @@
+[
+  {
+    "ID": "aws.credential-access.ec2-get-password-data",
+    "FriendlyName": "Retrieve EC2 Password Data",
+    "Platform": "AWS",
+    "MitreAttackTactics": ["Credential Access"],
+    "MitreAttackTechnique": "T1552.004",
+    "State": "DETONATED"
+  },
+  {
+    "ID": "aws.discovery.ec2-enumerate-from-instance",
+    "FriendlyName": "Execute Discovery Commands on an EC2 Instance",
+    "Platform": "AWS",
+    "MitreAttackTactics": ["Discovery"],
+    "State": "DETONATED"
+  },
+  {
+    "ID": "azure.execution.vm-custom-script-extension",
+    "FriendlyName": "Execute Command on Virtual Machine using Custom Script Extension",
+    "Platform": "Azure",
+    "MitreAttackTactics": ["Execution"],
+    "MitreAttackTechnique": "T1059",
+    "State": "DETONATED"
+  },
+  {
+    "ID": "aws.exfiltration.ec2-share-ami",
+    "FriendlyName": "Exfiltrate an AMI by Sharing It",
+    "Platform": "AWS",
+    "MitreAttackTactics": ["Exfiltration"],
+    "MitreAttackTechnique": "T1537",
+    "State": "COLD"
+  },
+  {
+    "ID": "aws.persistence.iam-backdoor-user",
+    "FriendlyName": "Create an Access Key on an IAM User",
+    "Platform": "AWS",
+    "MitreAttackTactics": ["Persistence"]
+  }
+]
