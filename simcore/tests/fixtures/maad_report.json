@@ -1,0 +1,17 @@
+{
+  "operation": "M365 Purple-Team Validation",
+  "tenant": "acme.onmicrosoft.com",
+  "modules": [
+    {"module": "DisableMFA", "target": "cfo@acme.com", "outcome": "Success"},
+    {"module": "BackdoorAccountCreation", "account": "svc-helpdesk@acme.com", "status": "succeeded"},
+    {"action": "Setup Email Forwarding", "mailbox": "ceo@acme.com", "state": "executed"},
+    {"module": "RemoveAccess", "target": "admin@acme.com", "result": "success"},
+    {"action": "Assign Azure AD Role", "target": "svc-helpdesk@acme.com", "outcome": "success"},
+    {"module": "CustomTenantTTP", "technique_id": "T1621", "tactic": "Credential Access",
+     "technique_name": "Multi-Factor Authentication Request Generation",
+     "service": "Entra ID", "target": "cfo@acme.com", "outcome": "success"},
+    {"module": "BruteForce", "target": "helpdesk@acme.com", "outcome": "failed"},
+    {"module": "AzureADRecon", "outcome": "success"},
+    {"action": "Recon Named Locations", "outcome": "success"}
+  ]
+}

@@ -172,6 +172,28 @@ CATALOG: dict[str, dict[str, Any]] = {
         "effort": "Medium",
         "frameworks": ["MITRE ATT&CK", "NIST DE.CM", "CIS Cloud", "SOC2 CC7.2"],
     },
+    "identity-technique-unprevented": {
+        "title": "Identity attack technique executed without confirmed detection",
+        "impact": "An emulated ATT&CK identity technique (MFA tampering, backdoor "
+        "account, mailbox forwarding, privileged-role assignment, data exfiltration) "
+        "executed against the M365/Entra tenant without being prevented. If the "
+        "identity detection stack did not alert, account takeover and persistence of "
+        "this class would go unnoticed.",
+        "steps": [
+            "Confirm the identity detection stack (Entra ID Protection, Defender for "
+            "Cloud Apps / Defender XDR) raised an alert for this activity.",
+            "Verify the Entra ID sign-in and audit logs and the Microsoft 365 unified "
+            "audit log are enabled and forwarded to the SIEM.",
+            "Tighten Conditional Access (block legacy auth, require phishing-resistant "
+            "MFA, restrict trusted locations) so the technique is prevented, not just "
+            "detected.",
+            "Add or tune a detection rule for the technique, then re-run the emulation "
+            "and track it in the coverage matrix until detection is confirmed.",
+        ],
+        "priority": "High",
+        "effort": "Medium",
+        "frameworks": ["MITRE ATT&CK", "NIST DE.CM", "CIS Microsoft 365", "SOC2 CC7.2"],
+    },
     "missing-permissions-policy": {
         "title": "Permissions-Policy not set",
         "impact": "Powerful browser features (camera, geolocation) are not "
