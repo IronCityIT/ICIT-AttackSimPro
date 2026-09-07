@@ -3,10 +3,12 @@
   "description": "Iron City AttackSimPro Cloud Functions (storeScanResults ingest)",
   "version": "1.1.0",
   "private": true,
-  "engines": { "node": "20" },
+  "engines": {
+    "node": "20"
+  },
   "main": "index.js",
   "scripts": {
-    "lint": "node --check index.js && node --check handler.js && node --check local-server.js",
+    "lint": "node --check index.js && node --check handler.js && node --check local-server.js && node --check server.js && node --check store/mariadb-store.js && node --check store/select-store.js && node --check store/http-ingest.js",
     "test": "node --test",
     "start:local": "node local-server.js",
     "smoke": "bash ../scripts/smoke.sh",
