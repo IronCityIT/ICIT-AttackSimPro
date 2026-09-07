@@ -19,10 +19,20 @@ STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 TMP="$DIR/.asp-${MARIADB_DATABASE}-${STAMP}.sql"
 OUT="$DIR/asp-${MARIADB_DATABASE}-${STAMP}.sql.gz"
 
+# The MySQL 8 client probes information_schema.COLUMN_STATISTICS, which MariaDB does not
+# have; disable it when this client supports the flag. The MariaDB client lacks the flag
+# (and does not need it), so add it only when present — keeps the script portable across
+# the CI runner (MySQL client) and the NAS host (MariaDB client).
+COLSTATS=""
+if mysqldump --help 2>/dev/null | grep -q -- '--column-statistics'; then
+  COLSTATS="--column-statistics=0"
+fi
+
 # Dump to a temp file first so a mysqldump failure is caught before we publish a .gz
 # (POSIX sh has no pipefail). --single-transaction = consistent, non-locking on InnoDB.
+# shellcheck disable=SC2086  # $COLSTATS is intentionally a single optional flag or empty
 mysqldump --host="$MARIADB_HOST" --port="$PORT" --user="$MARIADB_USER" \
-  --password="$MARIADB_PASSWORD" --single-transaction --routines --triggers \
+  --password="$MARIADB_PASSWORD" --single-transaction --routines --triggers $COLSTATS \
   --databases "$MARIADB_DATABASE" > "$TMP"
 gzip -c "$TMP" > "$OUT"
 rm -f "$TMP"
