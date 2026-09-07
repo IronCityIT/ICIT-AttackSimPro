@@ -19,6 +19,7 @@ const { makeRes } = require("../testkit/express-shim");
  */
 function createIngestServer(handler, opts = {}) {
   const dumpStore = opts.dumpStore;
+  const readHandler = opts.readHandler; // optional GET Read API (tenant-scoped, fail-closed)
   const maxSocketBytes = opts.maxSocketBytes || 2_000_000;
 
   return http.createServer((req, res) => {
@@ -33,6 +34,24 @@ function createIngestServer(handler, opts = {}) {
       if (req.method === "GET" && req.url === "/__dump" && dumpStore) {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(dumpStore(), null, 2));
+        return;
+      }
+      // Tenant-scoped Read API for the dashboard (GET). POST falls through to ingest.
+      if (req.method === "GET" && readHandler && (req.url || "/").startsWith("/clients/")) {
+        const shim = makeRes();
+        const q = {};
+        const qs = (req.url || "").split("?")[1];
+        if (qs) for (const kv of qs.split("&")) { const [k, v] = kv.split("="); q[decodeURIComponent(k)] = decodeURIComponent(v || ""); }
+        await readHandler({
+          method: "GET",
+          url: req.url,
+          path: (req.url || "/").split("?")[0],
+          query: q,
+          headers: req.headers,
+          get: (n) => req.headers[String(n).toLowerCase()],
+        }, shim);
+        res.writeHead(shim.statusCode, { "Content-Type": "application/json", ...shim.headers });
+        res.end(JSON.stringify(shim.body ?? {}));
         return;
       }
       let body = {};

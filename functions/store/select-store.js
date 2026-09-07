@@ -48,6 +48,7 @@ function createStore(opts = {}) {
     const pool = driver.createPool(url);
     return {
       db: createMariaDbStore({ pool }),
+      pool,
       describe: "mariadb (self-hosted, NAS-backed)",
       close: () => (pool.end ? pool.end() : undefined),
     };

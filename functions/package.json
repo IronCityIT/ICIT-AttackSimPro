@@ -8,7 +8,7 @@
   },
   "main": "index.js",
   "scripts": {
-    "lint": "node --check index.js && node --check handler.js && node --check local-server.js && node --check server.js && node --check store/mariadb-store.js && node --check store/select-store.js && node --check store/http-ingest.js",
+    "lint": "node --check index.js && node --check handler.js && node --check local-server.js && node --check server.js && node --check store/mariadb-store.js && node --check store/select-store.js && node --check store/http-ingest.js && node --check store/scan-repository.js && node --check store/read-api.js",
     "test": "node --test",
     "start:local": "node local-server.js",
     "smoke": "bash ../scripts/smoke.sh",
