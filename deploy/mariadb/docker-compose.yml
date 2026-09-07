@@ -1,0 +1,57 @@
+# AttackSim Pro — self-hosted store on ICIT NAS-backed infrastructure.
+# DESCRIBED, NOT APPLIED. Bill provisions on the NAS (QNAP Container Station or
+# equivalent). No secret values here — everything comes from the host environment / a
+# NAS secrets file that is never committed. Replaces the retired Firebase/Firestore store.
+#
+#   MariaDB datadir  -> NAS-backed volume (persistent relational state)
+#   evidence bundles -> NAS-backed volume (object/artifact files)
+#
+# The ingest API image is built from functions/ once its prod shell uses the MariaDB
+# adapter (functions/store/mariadb-store.js) instead of firebase-admin (subsequent PR).
+services:
+  mariadb:
+    image: mariadb:11.4
+    restart: unless-stopped
+    environment:
+      # Names only — values come from the NAS host env / secrets file, never committed.
+      MARIADB_DATABASE: ${MARIADB_DATABASE:-attacksimpro}
+      MARIADB_USER: ${MARIADB_USER}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD}
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
+    volumes:
+      # NAS-backed persistent data + one-shot schema init.
+      - ${ASP_NAS_DB_VOLUME:-asp_db_data}:/var/lib/mysql
+      - ./schema.sql:/docker-entrypoint-initdb.d/10-schema.sql:ro
+    # Bind only to the NAS-internal network; the ingest API reaches it, not the internet.
+    expose:
+      - "3306"
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+
+  ingest:
+    build:
+      context: ../../functions
+    image: attacksimpro-ingest:nas
+    restart: unless-stopped
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      PORT: "8088"
+      # Store selection + credentials by name only.
+      ASP_STORE: "mariadb"
+      ASP_MARIADB_URL: ${ASP_MARIADB_URL}   # e.g. mysql://user:pass@mariadb:3306/attacksimpro (from secrets)
+      INGEST_TOKEN: ${INGEST_TOKEN}          # shared-secret gate for GitHub Actions callers
+      ASP_EVIDENCE_ROOT: /evidence
+    volumes:
+      - ${ASP_NAS_EVIDENCE_VOLUME:-asp_evidence}:/evidence   # NAS-backed artifact files
+    # Published behind the existing reverse proxy terminating TLS for asp.ironcityit.com.
+    ports:
+      - "8088:8088"
+
+volumes:
+  asp_db_data:
+  asp_evidence:
