@@ -1,0 +1,66 @@
+name: AttackSimPro - Store Integration (MariaDB)
+
+# Verifies the self-hosted MariaDB store end to end against a REAL MariaDB service
+# container (Firebase retired): applies deploy/mariadb/schema.sql, then runs the ingest
+# handler through the MariaDB adapter via the env-gated integration test. No deploy, no
+# NAS, no secrets — the service password is an ephemeral per-run value.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'functions/**'
+      - 'deploy/mariadb/**'
+      - '.github/workflows/store-integration.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  mariadb-integration:
+    name: Store round-trip against real MariaDB
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_DATABASE: attacksimpro
+          MARIADB_USER: asp
+          # Ephemeral, per-run credentials for a throwaway CI container — not real secrets.
+          MARIADB_PASSWORD: ci_${{ github.run_id }}
+          MARIADB_ROOT_PASSWORD: root_${{ github.run_id }}
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=15
+    env:
+      DB_PW: ci_${{ github.run_id }}
+      ASP_MARIADB_URL: mysql://asp:ci_${{ github.run_id }}@127.0.0.1:3306/attacksimpro
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Wait for MariaDB and apply schema
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            if mysqladmin ping -h 127.0.0.1 -u asp -p"$DB_PW" --silent 2>/dev/null; then
+              echo "MariaDB is up"; break
+            fi
+            echo "waiting for MariaDB ($i)"; sleep 3
+          done
+          mysql -h 127.0.0.1 -u asp -p"$DB_PW" attacksimpro < deploy/mariadb/schema.sql
+          echo "schema applied"; mysql -h 127.0.0.1 -u asp -p"$DB_PW" attacksimpro -e "SHOW TABLES;"
+
+      - name: Install the MariaDB driver (CI only — not committed as a dependency)
+        working-directory: functions
+        run: npm install --no-save --no-audit --no-fund mysql2@^3
+
+      - name: Run the store test suite against real MariaDB
+        working-directory: functions
+        run: npm test
