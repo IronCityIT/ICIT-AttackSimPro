@@ -73,7 +73,25 @@ async function listScans(pool, clientId, opts = {}) {
     `SELECT ${SCAN_COLS} FROM scans WHERE client_id=? ORDER BY updated_at DESC LIMIT ?`,
     [cid, limit]
   );
-  return rowsOf(result).map(deserializeScan);
+  const scans = rowsOf(result).map(deserializeScan);
+  if (opts.withFindings && scans.length) {
+    // Batch-load findings for exactly this page of scans, still tenant-scoped.
+    const ids = scans.map((s) => s.scan_id);
+    const placeholders = ids.map(() => "?").join(", ");
+    const findRows = rowsOf(
+      await pool.query(
+        `SELECT scan_id, severity, scenario, title, detail, attack_json, evidence_json, remediation_key FROM findings WHERE client_id=? AND scan_id IN (${placeholders}) ORDER BY id`,
+        [cid, ...ids]
+      )
+    );
+    const byScan = new Map(scans.map((s) => [s.scan_id, s]));
+    for (const s of scans) s.findings = [];
+    for (const r of findRows) {
+      const s = byScan.get(r.scan_id);
+      if (s) s.findings.push(deserializeFinding(r));
+    }
+  }
+  return scans;
 }
 
 /** Get one scan (with its findings) for a tenant, or null. Always scoped to client_id. */

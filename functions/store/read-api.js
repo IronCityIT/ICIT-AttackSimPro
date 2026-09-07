@@ -68,8 +68,11 @@ function createReadHandler(opts = {}) {
         }
         res.status(200).json(scan);
       } else {
-        const limit = req.query && req.query.limit;
-        const scans = await listScans(pool, principal.client_id, { limit });
+        const q = req.query || {};
+        const scans = await listScans(pool, principal.client_id, {
+          limit: q.limit,
+          withFindings: q.include === "findings",
+        });
         res.status(200).json({ client_id: principal.client_id, scans });
       }
     } catch (err) {

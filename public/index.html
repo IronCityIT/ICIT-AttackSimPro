@@ -5,8 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>IronCity AttackSimPro - Purple Team Platform</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root{--gold:#D4AF37;--red:#DC143C;--dark:#0a0a14;--card:#1a1a2e;--purple:#9d4edd;--critical:#ff006e;--high:#ff4757;--medium:#ffa502;--low:#2ed573;--info:#54a0ff;--text:#fff;--muted:#a0a0b0;--border:#2a2a3e}
@@ -266,8 +264,9 @@ input[type=checkbox]{width:18px;height:18px;accent-color:var(--purple);cursor:po
 <footer class="footer"><div class="container"><p>© 2025 Iron City IT Advisors - AttackSimPro Purple Team Platform - Confidential</p></div></footer>
 
 <script>
-const firebaseConfig={apiKey:"AIzaSyAlbrFkibWK4XVCYaGISkVvbHF1ElVrUKU",authDomain:"ironcity-attacksimpro.firebaseapp.com",projectId:"ironcity-attacksimpro",storageBucket:"ironcity-attacksimpro.firebasestorage.app",messagingSenderId:"43248247502",appId:"1:43248247502:web:e51db50ad505c36da0a69f"};
-let db,allFindings=[],trendChart,remediatedItems=JSON.parse(localStorage.getItem('remediated')||'[]');
+// Data source: the self-hosted, tenant-scoped Read API (Firebase retired). Base URL is
+// same-origin by default; override with <meta name="asp-api-base" content="https://...">.
+let allFindings=[],trendChart,remediatedItems=JSON.parse(localStorage.getItem('remediated')||'[]');
 
 // Enhanced compliance mapping
 const complianceMap={
@@ -389,14 +388,14 @@ return['NIST ID.RA-1'];
 // Multi-tenant: the dashboard renders exactly one client's data, chosen by
 // ?client=<client_id> (matching the client_id partition the ingest function
 // writes). No client => demo mode. Cross-tenant reads are impossible by
-// construction here and are additionally denied by firestore.rules.
+// Read API (tenant-scoped, fail-closed).
 function getClientId(){
 try{return (new URLSearchParams(location.search).get('client')||'').trim();}catch(e){return '';}
 }
 const CLIENT_ID=getClientId();
 
 // Small, honest data-source banner so a client never mistakes demo data for a
-// real scan. 'live' = data read from Firestore; 'demo' = built-in sample set.
+// real scan. 'live' = data read from the Read API; 'demo' = built-in sample set.
 function setDataSource(mode,detail){
 let el=document.getElementById('data-source-banner');
 if(!el){el=document.createElement('div');el.id='data-source-banner';
@@ -407,7 +406,10 @@ else{el.style.background='rgba(255,165,2,.15)';el.style.borderColor='#ffa502';el
 console.info('[AttackSimPro] data source:',mode,detail||'');
 }
 
-try{firebase.initializeApp(firebaseConfig);db=firebase.firestore();loadDashboard()}catch(e){setDataSource('demo','init failed');loadDemoData()}
+// Read API config + host-supplied SSO bearer token (Auth0 integration; absent in demo).
+function apiBase(){try{const m=document.querySelector('meta[name="asp-api-base"]');return ((m&&m.content)||'').replace(/\/$/,'');}catch(e){return '';}}
+function getAuthToken(){try{return window.__ASP_TOKEN||sessionStorage.getItem('asp_token')||'';}catch(e){return '';}}
+loadDashboard();
 renderScenarioLibrary();
 
 // Output-encode any value before it reaches innerHTML.
@@ -442,12 +444,15 @@ grid.innerHTML='<div style="padding:16px;color:var(--muted)">Scenario library un
 async function loadDashboard(){
 if(!CLIENT_ID){setDataSource('demo','no ?client= selected');loadDemoData();return}
 try{
-// Read the client's own partition: clients/{client_id}/scans, newest first.
-// The ingest function writes created_at (server timestamp) — order by it.
-const snap=await db.collection('clients').doc(CLIENT_ID).collection('scans')
-.orderBy('created_at','desc').limit(20).get();
-const scans=[];
-snap.forEach(d=>scans.push({id:d.id,...d.data()}));
+// Read the client's own scans (newest first, with findings) from the tenant-scoped
+// Read API. The server enforces isolation; a caller can only read their own tenant.
+const token=getAuthToken();
+const res=await fetch(apiBase()+'/clients/'+encodeURIComponent(CLIENT_ID)+'/scans?limit=20&include=findings',
+{cache:'no-store',headers:token?{'Authorization':'Bearer '+token}:{}});
+if(res.status===401||res.status===403){setDataSource('demo','sign-in required');loadDemoData();return}
+if(!res.ok)throw new Error('read '+res.status);
+const data=await res.json();
+const scans=data.scans||[];
 if(!scans.length){setDataSource('demo','no scans for '+CLIENT_ID);loadDemoData();return}
 setDataSource('live',CLIENT_ID+' · '+scans.length+' scans');
 processScans(scans);

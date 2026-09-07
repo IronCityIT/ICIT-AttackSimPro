@@ -41,6 +41,11 @@ function seededPool() {
           .sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1));
         return [rows, []];
       }
+      if (s.startsWith("SELECT") && s.includes("FROM findings") && s.includes(" IN (")) {
+        const cid = params[0];
+        const ids = params.slice(1);
+        return [findings.filter((r) => r.client_id === cid && ids.includes(r.scan_id)), []];
+      }
       if (s.startsWith("SELECT") && s.includes("FROM findings")) {
         const [cid, sid] = params;
         return [findings.filter((r) => r.client_id === cid && r.scan_id === sid), []];
@@ -54,7 +59,10 @@ const authorizeAs = (client_id, role = "viewer") => () => ({ client_id, role });
 
 // Build a GET request the way the server does: path derived from the url.
 function get(url) {
-  return makeReq({ method: "GET", url, path: url.split("?")[0] });
+  const [path, qs] = url.split("?");
+  const query = {};
+  if (qs) for (const kv of qs.split("&")) { const [k, v] = kv.split("="); query[decodeURIComponent(k)] = decodeURIComponent(v || ""); }
+  return { ...makeReq({ method: "GET", url, path }), query };
 }
 
 test("repository fail-closed: empty client_id throws, never widens the query", async () => {
@@ -126,4 +134,15 @@ test("read API: single scan + 404 on miss, method + path guards", async () => {
 
 test("createReadHandler requires a pool", () => {
   assert.throws(() => createReadHandler({}), /a pool with query/);
+});
+
+test("read API include=findings attaches each scan's findings (tenant-scoped)", async () => {
+  const handler = createReadHandler({ pool: seededPool(), authorize: authorizeAs("acme") });
+  const res = makeRes();
+  await handler(get("/clients/acme/scans?include=findings"), res);
+  assert.equal(res.statusCode, 200);
+  const a2 = res.body.scans.find((x) => x.scan_id === "a2");
+  assert.ok(Array.isArray(a2.findings));
+  assert.equal(a2.findings.length, 1);
+  assert.deepEqual(a2.findings[0].attack, ["T1190"]);
 });

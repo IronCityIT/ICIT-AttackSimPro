@@ -11,7 +11,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
-function loadDashboard({ search = "", firestoreDocs = null } = {}) {
+function loadDashboard({ search = "", firestoreDocs = null, scans } = {}) {
   const html = fs.readFileSync(
     path.join(__dirname, "..", "..", "public", "index.html"),
     "utf8"
@@ -50,31 +50,24 @@ function loadDashboard({ search = "", firestoreDocs = null } = {}) {
     body: { appendChild() {} },
   };
 
-  // Firebase double. If firestoreDocs is provided, a live read resolves to them;
-  // otherwise initializeApp throws to drive the demo fallback path.
-  let firebase;
-  if (firestoreDocs) {
-    firebase = {
-      initializeApp() {},
-      firestore() {
-        return {
-          collection() { return this; },
-          doc() { return this; },
-          orderBy() { return this; },
-          limit() { return this; },
-          async get() {
-            return { forEach: (cb) => firestoreDocs.forEach((d) => cb({ id: d.id, data: () => d })) };
-          },
-        };
-      },
-    };
-  } else {
-    firebase = { initializeApp() { throw new Error("no firebase"); } };
-  }
+  // Read API (fetch) double. `scans` (or the legacy `firestoreDocs` alias) is what a live
+  // GET /clients/{cid}/scans resolves to; `null` simulates an unauthorized read (401),
+  // which drives the demo fallback. Non-/clients fetches (catalog.json) 404 as in a bare
+  // test env.
+  const scanData = scans !== undefined ? scans : firestoreDocs;
+  const fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("/clients/")) {
+      if (scanData == null) return { ok: false, status: 401, async json() { return {}; } };
+      const cid = decodeURIComponent((u.match(/\/clients\/([^/?]+)/) || [])[1] || "");
+      return { ok: true, status: 200, async json() { return { client_id: cid, scans: scanData }; } };
+    }
+    return { ok: false, status: 404, async json() { return {}; } };
+  };
 
   const sandbox = {
     document: doc,
-    firebase,
+    fetch,
     Chart: function () { return { destroy() {} }; },
     localStorage: { getItem: () => null, setItem() {} },
     location: { search },
@@ -142,4 +135,12 @@ test("live read maps stored records (target field) into findings", async () => {
   assert.equal(state().allFindings.length, 2);
   // The corrected contract: target comes from the scan's `target` field.
   assert.equal(state().allFindings[0].target, "https://acme.example");
+});
+
+test("dashboard falls back to demo when the Read API denies (401)", async () => {
+  // scans:null => the Read API stub returns 401 -> the dashboard shows demo data.
+  const { state } = loadDashboard({ search: "?client=acme-corp", scans: null });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(state().CLIENT_ID, "acme-corp");
+  assert.equal(state().allFindings.length, 8); // demo set, not a live read
 });
