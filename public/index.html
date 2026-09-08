@@ -168,6 +168,18 @@ input[type=checkbox]{width:18px;height:18px;accent-color:var(--purple);cursor:po
 .scenario-card .tag{font-size:.65rem;padding:2px 8px;border-radius:10px;background:rgba(157,78,221,.15);color:var(--purple);font-weight:600}
 .scenario-card .tag.attack{background:rgba(212,175,55,.15);color:var(--gold)}
 .scenario-card .tag.safe{background:rgba(46,213,115,.15);color:var(--low)}
+.attack-section{padding:24px 0}
+.attack-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.attack-card{background:var(--card);border:1px solid var(--border);border-left:4px solid var(--muted);border-radius:10px;padding:12px}
+.attack-card.low{border-left-color:var(--low)}
+.attack-card.medium{border-left-color:var(--medium)}
+.attack-card.high{border-left-color:var(--high)}
+.attack-card.critical{border-left-color:var(--critical)}
+.attack-tid{font-weight:700;color:var(--gold);font-size:.95rem}
+.attack-meta-row{display:flex;justify-content:space-between;align-items:center;margin:6px 0;font-size:.75rem}
+.attack-count{color:var(--text);font-weight:600}
+.attack-sev{text-transform:uppercase;color:var(--muted);letter-spacing:1px}
+.attack-tactics{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
 </style>
 </head>
 <body>
@@ -240,6 +252,9 @@ input[type=checkbox]{width:18px;height:18px;accent-color:var(--purple);cursor:po
 <div class="compliance-badge"><h4>CMMC</h4><p>Defense</p><div class="compliance-count" id="cmmc-count">--</div></div>
 </div></section>
 
+<section class="attack-section"><div class="card"><div class="card-header"><h2>🎯 ATT&CK Coverage</h2><div class="card-actions"><span id="attack-meta" style="color:var(--muted);font-size:.8rem"></span></div></div>
+<div class="attack-grid" id="attack-grid"></div>
+</div></section>
 <section class="scenario-section"><div class="card"><div class="card-header"><h2>🧪 Simulation Scenario Library</h2><div class="card-actions"><span id="scenario-meta" style="color:var(--muted);font-size:.8rem"></span></div></div>
 <p style="color:var(--muted);font-size:.85rem;margin:0 0 14px">Non-destructive, authorized control-validation scenarios. Every run is gated by a scope/authorization policy and recorded in a tamper-evident audit trail. This library is generated from the engine's own registry — the same source of truth the CLI uses.</p>
 <div class="scenario-grid" id="scenario-grid">
@@ -481,6 +496,7 @@ document.getElementById('ai-finding-count').textContent=allFindings.length;
 updateRiskScore(tH,tM,tL);
 updateComplianceCounts();
 renderFindingsList();
+renderAttackCoverage();
 renderTrendChart(scans);
 }
 
@@ -520,6 +536,33 @@ document.getElementById('soc2-count').textContent=c.soc2;
 document.getElementById('owasp-count').textContent=c.owasp;
 document.getElementById('iso-count').textContent=c.iso;
 document.getElementById('cmmc-count').textContent=c.cmmc;
+}
+
+function renderAttackCoverage(){
+const grid=document.getElementById('attack-grid');
+if(!grid)return;
+const sevRank={info:0,low:1,medium:2,high:3,critical:4};
+const techniques={},tactics={};
+allFindings.forEach(f=>{
+const tactic=(f.evidence&&f.evidence.tactic)||f.tactic||'';
+if(tactic)tactics[tactic]=(tactics[tactic]||0)+1;
+const sev=String(f.severity||f.risk||'info').toLowerCase();
+(f.attack||[]).forEach(tid=>{
+if(!tid)return;
+const t=techniques[tid]||(techniques[tid]={tid:tid,count:0,tactics:{},sev:'info'});
+t.count++;if(tactic)t.tactics[tactic]=1;
+if((sevRank[sev]||0)>(sevRank[t.sev]||0))t.sev=sev;
+});
+});
+const list=Object.values(techniques).sort((a,b)=>a.tid<b.tid?-1:1);
+const meta=document.getElementById('attack-meta');
+if(meta)meta.textContent=list.length+' techniques · '+Object.keys(tactics).length+' tactics';
+if(!list.length){grid.innerHTML='<div style="padding:16px;color:var(--muted)">No ATT&CK-mapped techniques in the current data.</div>';return;}
+grid.innerHTML=list.map(t=>`<div class="attack-card ${esc(t.sev)}">
+<div class="attack-tid">${esc(t.tid)}</div>
+<div class="attack-meta-row"><span class="attack-count">${t.count}\u00d7</span><span class="attack-sev">${esc(t.sev)}</span></div>
+<div class="attack-tactics">${Object.keys(t.tactics).map(x=>'<span class="tag">'+esc(x)+'</span>').join('')||'<span style="color:var(--muted)">\u2014</span>'}</div>
+</div>`).join('');
 }
 
 function renderFindingsList(filter='all'){
@@ -681,6 +724,7 @@ document.getElementById('ai-finding-count').textContent=demo.length;
 updateRiskScore(3,3,1);
 updateComplianceCounts();
 renderFindingsList();
+renderAttackCoverage();
 renderTrendChart([
 {summary:{critical_count:1,high_count:4,medium_count:8,low_count:10}},
 {summary:{critical_count:1,high_count:3,medium_count:6,low_count:8}},

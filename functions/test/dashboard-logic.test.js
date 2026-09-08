@@ -144,3 +144,39 @@ test("dashboard falls back to demo when the Read API denies (401)", async () => 
   assert.equal(state().CLIENT_ID, "acme-corp");
   assert.equal(state().allFindings.length, 8); // demo set, not a live read
 });
+test("ATT&CK coverage panel aggregates live findings by technique", async () => {
+  const scans = [
+    {
+      scan_id: "s1", target: "https://acme.example",
+      summary: { high_count: 2, medium_count: 1 },
+      findings: [
+        { name: "Undetected Technique", severity: "high", attack: ["T1003"],
+          evidence: { tactic: "credential-access" } },
+        { name: "Undetected Technique", severity: "high", attack: ["T1003"],
+          evidence: { tactic: "credential-access" } },
+        { name: "Lateral Movement", severity: "medium", attack: ["T1021"],
+          evidence: { tactic: "lateral-movement" } },
+      ],
+    },
+  ];
+  const { elements } = loadDashboard({ search: "?client=acme-corp", scans });
+  await new Promise((r) => setTimeout(r, 20));
+  const grid = elements.get("attack-grid");
+  const meta = elements.get("attack-meta");
+  // Two unique techniques (T1003 counted 2x, T1021 once), two tactics.
+  assert.match(meta._text, /2 techniques/);
+  assert.match(meta._text, /2 tactics/);
+  assert.ok(grid._html.includes("T1003"));
+  assert.ok(grid._html.includes("T1021"));
+  assert.ok(grid._html.includes("credential-access"));
+  // Output-encoded, no raw tool names.
+  assert.ok(!/caldera|purplesharp/i.test(grid._html));
+});
+
+test("ATT&CK coverage panel is graceful when findings have no technique ids", async () => {
+  // Demo/no-client path -> demo findings (no `attack`) -> panel shows the empty message.
+  const { elements } = loadDashboard({ search: "" });
+  await new Promise((r) => setTimeout(r, 20));
+  const grid = elements.get("attack-grid");
+  assert.ok(grid._html.includes("No ATT&CK-mapped techniques"));
+});
