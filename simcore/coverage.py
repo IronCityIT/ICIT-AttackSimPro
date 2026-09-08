@@ -34,6 +34,24 @@ def _title_for(source: str, titles: dict[str, str]) -> str:
     return titles.get(source) or source.replace("-", " ").replace("_", " ").title()
 
 
+def _canon_tactic(value: Any) -> str:
+    """Canonical tactic key: lowercase, spaces -> hyphens, so 'Credential Access' and
+    'credential-access' (adapters emit both) collapse to one key."""
+    return str(value or "").strip().lower().replace(" ", "-")
+
+
+def _finding_tactics(evidence: dict[str, Any]) -> list[str]:
+    """Tactics for a finding: evidence.tactic (singular) or evidence.tactics (list),
+    each canonicalized so mixed formats across adapters aggregate together."""
+    raw = evidence.get("tactic")
+    if raw:
+        return [_canon_tactic(raw)]
+    lst = evidence.get("tactics")
+    if isinstance(lst, list):
+        return [_canon_tactic(t) for t in lst if str(t).strip()]
+    return []
+
+
 def aggregate(run_docs: list[dict[str, Any]]) -> dict[str, Any]:
     """Combine run-docs into a single ATT&CK coverage view. Pure; no I/O."""
     titles = _source_titles()
@@ -56,9 +74,12 @@ def aggregate(run_docs: list[dict[str, Any]]) -> dict[str, Any]:
         for f in findings:
             sev = str(f.get("severity", "info")).lower()
             sev_totals[sev] += 1
-            tactic = str((f.get("evidence") or {}).get("tactic") or "").strip().lower()
-            if tactic:
-                by_tactic[tactic] += 1
+            # Tactic lives in evidence.tactic (singular) for most adapters, or
+            # evidence.tactics (a list) for the cloud adapter — handle both so no
+            # source is silently dropped from the tactic breakdown.
+            ftactics = _finding_tactics(f.get("evidence") or {})
+            for tac in ftactics:
+                by_tactic[tac] += 1
             for tid in f.get("attack", []) or []:
                 if not tid:
                     continue
@@ -67,8 +88,8 @@ def aggregate(run_docs: list[dict[str, Any]]) -> dict[str, Any]:
                                                 "max_severity": "info"})
                 t["count"] += 1
                 t["sources"].add(src_title)
-                if tactic:
-                    t["tactics"].add(tactic)
+                for tac in ftactics:
+                    t["tactics"].add(tac)
                 t["max_severity"] = _max_sev(t["max_severity"], sev)
 
     tech_list = sorted(

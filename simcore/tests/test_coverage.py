@@ -82,6 +82,18 @@ class TestCoverageAggregate(unittest.TestCase):
         for bad in ("caldera", "guardicore", "purplesharp"):
             self.assertNotIn(bad, low)
 
+    def test_cloud_plural_tactics_counted_in_by_tactic(self):
+        # Stratus findings store evidence.tactics (a list); they must not be dropped from
+        # the tactic breakdown. The stratus fixture detonates a credential-access technique.
+        self.assertIn("credential-access", self.summary["by_tactic"])
+        # No tactic appears under two keys (space vs hyphen / case): all canonicalized.
+        keys = list(self.summary["by_tactic"])
+        self.assertFalse(any(" " in k or k != k.lower() for k in keys), keys)
+        self.assertNotIn("credential access", keys)  # the un-canonical stratus/maad form
+        # A stratus (cloud) technique carries its canonical tactic in the matrix.
+        techs = {t["technique_id"]: t for t in self.summary["techniques"]}
+        self.assertIn("credential-access", techs["T1552.004"]["tactics"])
+
     def test_empty_input(self):
         s = coverage.aggregate([])
         self.assertEqual(s["totals"]["sources"], 0)
