@@ -281,7 +281,7 @@ input[type=checkbox]{width:18px;height:18px;accent-color:var(--purple);cursor:po
 <script>
 // Data source: the self-hosted, tenant-scoped Read API (Firebase retired). Base URL is
 // same-origin by default; override with <meta name="asp-api-base" content="https://...">.
-let allFindings=[],trendChart,remediatedItems=JSON.parse(localStorage.getItem('remediated')||'[]');
+let allFindings=[],trendChart,catalogRemediation={},remediatedItems=JSON.parse(localStorage.getItem('remediated')||'[]');
 
 // Enhanced compliance mapping
 const complianceMap={
@@ -384,6 +384,23 @@ impact:'Address this finding to improve overall security posture.',
 frameworks:['NIST PR.IP-1','CIS 4.1']
 };
 
+async function loadRemediationCatalog(){
+try{
+const res=await fetch('remediation.json',{cache:'no-store'});
+if(!res.ok)return;
+const data=await res.json();
+catalogRemediation=(data&&data.catalog)||{};
+}catch(e){/* best-effort: the inline DB remains the fallback */}
+}
+
+// Prefer the finding's own remediation_key against the shared engine catalog (the same
+// guidance the report uses); fall back to the inline title-substring DB for legacy data.
+function remediationFor(f){
+const rk=f&&f.remediation_key;
+if(rk&&catalogRemediation&&catalogRemediation[rk])return catalogRemediation[rk];
+return getRemediation((f&&(f.title||f.name))||'');
+}
+
 function getRemediation(name){
 const key=(name||'').toLowerCase();
 for(const[k,v]of Object.entries(remediationDB)){
@@ -458,6 +475,7 @@ grid.innerHTML='<div style="padding:16px;color:var(--muted)">Scenario library un
 
 async function loadDashboard(){
 if(!CLIENT_ID){setDataSource('demo','no ?client= selected');loadDemoData();return}
+await loadRemediationCatalog();
 try{
 // Read the client's own scans (newest first, with findings) from the tenant-scoped
 // Read API. The server enforces isolation; a caller can only read their own tenant.
@@ -584,7 +602,7 @@ const desc=x.detail||x.description||'';
 const r=remediatedItems.includes(key);
 const sev=(x.severity||x.risk||'info').toLowerCase();
 const tags=getComplianceTags(key).slice(0,4);
-const rem=getRemediation(key);
+const rem=remediationFor(x);
 const id='finding-'+i;
 
 return `
@@ -604,7 +622,7 @@ return `
 <ul class="remediation-steps">
 ${rem.steps.map((s,j)=>`<li><span class="step-number">${j+1}</span><span>${s}</span></li>`).join('')}
 </ul>
-<div class="code-block">${rem.code.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
+${rem.code?'<div class="code-block">'+rem.code.replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div>':''}
 </div>
 <div class="remediation-section">
 <h4><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg> Impact & Priority</h4>
@@ -678,7 +696,7 @@ function filterFindings(f){renderFindingsList(f)}
 function exportFindings(){
 const csv=['Finding,Severity,Compliance,Target,Remediated,Priority,Effort'];
 allFindings.forEach(f=>{
-const rem=getRemediation(f.title||f.name);
+const rem=remediationFor(f);
 const _lbl=f.title||f.name||'';csv.push('"'+_lbl+'","'+(f.severity||f.risk||'')+'","'+getComplianceTags(_lbl).join(';')+'","'+(f.target||'')+'","'+(remediatedItems.includes(_lbl)?'Yes':'No')+'","'+rem.priority+'","'+rem.effort+'"');
 });
 const b=new Blob([csv.join('\n')],{type:'text/csv'});

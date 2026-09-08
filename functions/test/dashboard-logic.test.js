@@ -62,6 +62,16 @@ function loadDashboard({ search = "", firestoreDocs = null, scans } = {}) {
       const cid = decodeURIComponent((u.match(/\/clients\/([^/?]+)/) || [])[1] || "");
       return { ok: true, status: 200, async json() { return { client_id: cid, scans: scanData }; } };
     }
+    if (u.includes("remediation.json")) {
+      return { ok: true, status: 200, async json() {
+        return { version: 1, catalog: {
+          "missing-hsts": { title: "Strict-Transport-Security not enforced",
+            impact: "HSTS impact from the shared catalog.",
+            steps: ["CATALOG-STEP: send the HSTS header"],
+            priority: "High", effort: "Low", frameworks: ["PCI 4.1"] },
+        } };
+      } };
+    }
     return { ok: false, status: 404, async json() { return {}; } };
   };
 
@@ -207,4 +217,24 @@ test("dashboard renders engine-shaped findings (title/detail, no name) as live d
   assert.ok(!list._html.includes("Unknown Finding"), "no unknown-finding placeholder");
   // Compliance mapping resolves from the title (Missing HSTS -> a real mapping, not default).
   assert.ok(list._html.includes("compliance-tag"), "compliance tags rendered");
+});
+
+test("dashboard remediation prefers the finding's remediation_key -> shared catalog", async () => {
+  const scans = [
+    {
+      scan_id: "s1", target: "https://acme.example", summary: { high_count: 1 },
+      findings: [
+        { title: "Strict-Transport-Security not enforced", detail: "no hsts",
+          severity: "high", remediation_key: "missing-hsts", attack: ["T1071"],
+          evidence: { tactic: "command-and-control" } },
+      ],
+    },
+  ];
+  const { elements } = loadDashboard({ search: "?client=acme-corp", scans });
+  await new Promise((r) => setTimeout(r, 30));
+  const list = elements.get("findings-list");
+  // The remediation panel shows the CATALOG steps (resolved by remediation_key), not a
+  // fuzzy inline-DB match.
+  assert.ok(list._html.includes("CATALOG-STEP: send the HSTS header"),
+    "catalog remediation step rendered via remediation_key");
 });
