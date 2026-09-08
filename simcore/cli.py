@@ -193,6 +193,21 @@ def _cmd_schedule(args) -> int:
     return 0
 
 
+def _cmd_coverage(args) -> int:
+    from simcore import coverage as coverage_mod
+
+    docs = []
+    for path in args.runs:
+        with open(path, encoding="utf-8") as fh:
+            docs.append(json.load(fh))
+    summary = coverage_mod.aggregate(docs)
+    if args.format in ("md", "markdown"):
+        print(coverage_mod.render_markdown(summary))
+    else:
+        print(json.dumps(summary, indent=2))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="simcore", description="AttackSimPro safe simulation engine")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -244,6 +259,10 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("schedule", help="print the run plan for a schedule file")
     s.add_argument("--file", required=True)
     s.set_defaults(fn=_cmd_schedule)
+    cov = sub.add_parser("coverage", help="aggregate ATT&CK coverage across run.json files")
+    cov.add_argument("--runs", nargs="+", required=True, help="one or more run.json files")
+    cov.add_argument("--format", default="json", choices=["json", "md", "markdown"])
+    cov.set_defaults(fn=_cmd_coverage)
     return p
 
 
