@@ -214,6 +214,36 @@ CATALOG: dict[str, dict[str, Any]] = {
         "effort": "Medium",
         "frameworks": ["MITRE ATT&CK", "NIST DE.CM", "CIS 8", "SOC2 CC7.2"],
     },
+    "network-propagation-unprevented": {
+        "title": "Lateral movement across the network was not prevented",
+        "impact": "An automated agent moved between hosts (exploitation / lateral movement "
+        "/ credential reuse) without being stopped. Once a single host is compromised, an "
+        "adversary can reach others of this class unimpeded.",
+        "steps": [
+            "Enforce host-based firewalls and least-privilege east-west rules between hosts.",
+            "Disable/limit credential reuse (LAPS for local admins, unique service creds, "
+            "tiered admin) and block the abused remote-execution channel where not required.",
+            "Add EDR/NDR detection for lateral movement and alert on unexpected east-west "
+            "connections; re-run the simulation until the path is blocked or detected.",
+        ],
+        "priority": "High",
+        "effort": "Medium",
+        "frameworks": ["MITRE ATT&CK", "NIST PR.AC-5", "CIS 12", "PCI 1.3"],
+    },
+    "network-segmentation-gap": {
+        "title": "Network segmentation boundary not enforced",
+        "impact": "Traffic crossed a segmentation boundary that should have blocked it, so a "
+        "compromise in one zone can reach a more sensitive zone (flat-network risk).",
+        "steps": [
+            "Define and enforce segmentation between zones (VLAN ACLs / firewall rules / "
+            "microsegmentation); default-deny east-west and allow only required flows.",
+            "Verify the boundary blocks the observed source→destination path, then re-test.",
+            "Monitor and alert on cross-segment traffic that violates policy.",
+        ],
+        "priority": "High",
+        "effort": "High",
+        "frameworks": ["NIST SC-7", "CIS 12.2", "PCI 1.2", "ISO A.13.1"],
+    },
     "missing-permissions-policy": {
         "title": "Permissions-Policy not set",
         "impact": "Powerful browser features (camera, geolocation) are not "

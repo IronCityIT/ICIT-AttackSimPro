@@ -1,0 +1,12 @@
+{
+  "operation": "Network BAS - Acme",
+  "events": [
+    {"type": "exploitation", "source": "10.0.0.5", "target": "10.0.1.9", "technique_id": "T1210", "success": true},
+    {"type": "segmentation", "source_segment": "workstations", "target_segment": "servers", "target": "10.0.1.9", "success": true},
+    {"type": "propagation", "source": "10.0.1.9", "target": "10.0.2.4", "technique_id": "T1021", "success": true},
+    {"type": "credential_reuse", "target": "10.0.2.4", "technique_id": "T1078", "success": true},
+    {"type": "exploitation", "source": "10.0.0.5", "target": "10.0.3.1", "technique_id": "T1190", "success": false},
+    {"type": "technique", "target": "10.0.2.4", "technique_id": "T1046", "tactic": "discovery", "success": true},
+    {"type": "propagation", "source": "10.0.0.5", "target": "10.0.9.9", "technique_id": "T1021"}
+  ]
+}
