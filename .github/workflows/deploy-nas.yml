@@ -1,0 +1,105 @@
+name: AttackSimPro - Deploy to NAS (self-hosted)
+
+# Builds the self-hosted ingest+Read API image (functions/Dockerfile.prod) and publishes it
+# to the ICIT container registry so the NAS host can pull it. Replaces the retired Firebase
+# deploy (deploy-functions.yml). workflow_dispatch ONLY, dry_run by default — a real push
+# happens only on an explicit dry_run=false AND with the registry secrets provisioned
+# (REVIEW ONLY tier: a dry-run dispatch is allowed; a real deploy is Bill's to run).
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Build and validate only — do not push the image or notify the NAS'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-nas-attacksimpro
+  cancel-in-progress: false
+
+# Provisioned by Bill (names only; never committed):
+#   ASP_REGISTRY        e.g. registry.ironcityit.com/attacksimpro-ingest
+#   ASP_REGISTRY_USER / ASP_REGISTRY_TOKEN   registry credentials
+#   ASP_NAS_DEPLOY_WEBHOOK   optional URL the NAS listens on to pull + restart
+jobs:
+  build-and-publish:
+    name: Build image, publish on real deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the production image
+        run: |
+          set -euo pipefail
+          TAG="asp-ingest:${GITHUB_SHA::12}"
+          docker build -f functions/Dockerfile.prod -t "$TAG" functions
+          echo "IMAGE_TAG=$TAG" >> "$GITHUB_ENV"
+          echo "Built $TAG"
+
+      - name: Smoke the image (in-memory store)
+        run: |
+          set -euo pipefail
+          docker run -d --name asp -p 8088:8088 -e INGEST_TOKEN=citok -e ASP_STORE=memory "$IMAGE_TAG"
+          for _ in $(seq 1 20); do
+            [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8088/healthz || true)" = "200" ] && break
+            sleep 2
+          done
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8088/healthz)" = "200"
+          docker rm -f asp >/dev/null
+
+      - name: Dry run stops here
+        if: inputs.dry_run
+        run: echo "dry_run=true — image built and smoked, nothing pushed or deployed."
+
+      - name: Require registry credentials for a real deploy
+        if: ${{ !inputs.dry_run }}
+        env:
+          REG: ${{ secrets.ASP_REGISTRY }}
+          USER: ${{ secrets.ASP_REGISTRY_USER }}
+          TOKEN: ${{ secrets.ASP_REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${REG:-}" ] || [ -z "${USER:-}" ] || [ -z "${TOKEN:-}" ]; then
+            echo "::error::ASP_REGISTRY / ASP_REGISTRY_USER / ASP_REGISTRY_TOKEN are not set."
+            echo "Provision the ICIT registry + credentials as repo secrets, then re-run with dry_run=false."
+            exit 1
+          fi
+          echo "registry credentials present"
+
+      - name: Push image to the ICIT registry
+        if: ${{ !inputs.dry_run }}
+        env:
+          REG: ${{ secrets.ASP_REGISTRY }}
+          USER: ${{ secrets.ASP_REGISTRY_USER }}
+          TOKEN: ${{ secrets.ASP_REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "$TOKEN" | docker login "${REG%%/*}" -u "$USER" --password-stdin
+          REMOTE="${REG}:${GITHUB_SHA::12}"
+          docker tag "$IMAGE_TAG" "$REMOTE"
+          docker push "$REMOTE"
+          docker tag "$IMAGE_TAG" "${REG}:latest"
+          docker push "${REG}:latest"
+          echo "pushed $REMOTE and ${REG}:latest"
+
+      - name: Notify the NAS to pull + restart (optional)
+        if: ${{ !inputs.dry_run }}
+        env:
+          WEBHOOK: ${{ secrets.ASP_NAS_DEPLOY_WEBHOOK }}
+          REG: ${{ secrets.ASP_REGISTRY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${WEBHOOK:-}" ]; then
+            echo "ASP_NAS_DEPLOY_WEBHOOK not set — image is pushed; NAS pulls on its own schedule."
+            exit 0
+          fi
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$WEBHOOK" \
+            -H 'Content-Type: application/json' \
+            --data "{\"image\":\"${REG}:${GITHUB_SHA::12}\"}")
+          echo "NAS webhook responded $code"
+          [ "$code" -ge 200 ] && [ "$code" -lt 300 ]
