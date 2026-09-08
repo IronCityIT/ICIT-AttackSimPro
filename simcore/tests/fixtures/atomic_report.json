@@ -1,0 +1,16 @@
+{
+  "operation": "Endpoint Detection Validation",
+  "host": "WIN-WKS01",
+  "atomics": [
+    {"technique": "T1059.001", "test_name": "Mimikatz via PowerShell", "exit_code": 0, "host": "WIN-WKS01",
+     "guid": "3f3af9a8-9c0e-4f7b-9a11-1f0e2a3b4c5d"},
+    {"technique_id": "T1003.001", "TestName": "Dump LSASS with comsvcs.dll", "ExitCode": 0,
+     "tactic": "Credential Access", "Hostname": "WIN-DC01"},
+    {"technique": "T1021.002", "test_name": "Map admin share", "exit_code": 0},
+    {"technique": "T1486", "test_name": "Encrypt files", "exit_code": 0},
+    {"technique": "T1055", "test_name": "Process Injection", "exit_code": 1},
+    {"technique": "T1082", "test_name": "System Information Discovery", "outcome": "success"},
+    {"technique": "T1057", "test_name": "Process Discovery", "outcome": "error"},
+    {"test": "housekeeping-marker"}
+  ]
+}
