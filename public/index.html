@@ -385,7 +385,7 @@ frameworks:['NIST PR.IP-1','CIS 4.1']
 };
 
 function getRemediation(name){
-const key=name.toLowerCase();
+const key=(name||'').toLowerCase();
 for(const[k,v]of Object.entries(remediationDB)){
 if(key.includes(k))return v;
 }
@@ -517,7 +517,7 @@ el.querySelector('.risk-score-value').textContent=g;
 function updateComplianceCounts(){
 const c={nist:0,cis:0,pci:0,hipaa:0,soc2:0,owasp:0,iso:0,cmmc:0};
 allFindings.forEach(f=>{
-getComplianceTags(f.name).forEach(t=>{
+getComplianceTags(f.title||f.name).forEach(t=>{
 if(t.startsWith('NIST'))c.nist++;
 if(t.startsWith('CIS'))c.cis++;
 if(t.startsWith('PCI'))c.pci++;
@@ -568,7 +568,7 @@ grid.innerHTML=list.map(t=>`<div class="attack-card ${esc(t.sev)}">
 function renderFindingsList(filter='all'){
 const container=document.getElementById('findings-list');
 let f=allFindings;
-if(filter==='open')f=f.filter(x=>!remediatedItems.includes(x.name));
+if(filter==='open')f=f.filter(x=>!remediatedItems.includes(x.title||x.name));
 
 if(!f.length){
 container.innerHTML='<div style="text-align:center;padding:40px;color:var(--muted)">No findings found</div>';
@@ -576,17 +576,22 @@ return;
 }
 
 container.innerHTML=f.slice(0,50).map((x,i)=>{
-const r=remediatedItems.includes(x.name);
-const sev=(x.risk||x.severity||'info').toLowerCase();
-const tags=getComplianceTags(x.name).slice(0,4);
-const rem=getRemediation(x.name);
+// Findings from the engine/adapters use `title`/`detail`; the legacy/demo shape used
+// `name`/`description`. Accept both so real ingested findings render correctly.
+const label=x.title||x.name||'Unknown Finding';
+const key=x.title||x.name||'';
+const desc=x.detail||x.description||'';
+const r=remediatedItems.includes(key);
+const sev=(x.severity||x.risk||'info').toLowerCase();
+const tags=getComplianceTags(key).slice(0,4);
+const rem=getRemediation(key);
 const id='finding-'+i;
 
 return `
 <div class="finding-item ${r?'remediated':''}">
 <div class="finding-header" onclick="toggleRemediation('${id}')">
-<div class="checkbox-cell"><input type="checkbox" ${r?'checked':''} onclick="event.stopPropagation();toggleRemediatedItem(this,'${x.name}')"></div>
-<div class="finding-name">${x.name||'Unknown Finding'}<small>${x.description?.substring(0,100)||'Click to view remediation guidance'}</small></div>
+<div class="checkbox-cell"><input type="checkbox" ${r?'checked':''} onclick="event.stopPropagation();toggleRemediatedItem(this,'${esc(key)}')"></div>
+<div class="finding-name">${esc(label)}<small>${esc(desc.substring(0,100))||'Click to view remediation guidance'}</small></div>
 <div><span class="severity-badge severity-${sev}">${sev}</span></div>
 <div class="compliance-tags">${tags.map(t=>'<span class="compliance-tag">'+t+'</span>').join('')}</div>
 <div class="finding-target">${x.target||x.host||'--'}</div>
@@ -673,8 +678,8 @@ function filterFindings(f){renderFindingsList(f)}
 function exportFindings(){
 const csv=['Finding,Severity,Compliance,Target,Remediated,Priority,Effort'];
 allFindings.forEach(f=>{
-const rem=getRemediation(f.name);
-csv.push('"'+(f.name||'')+'","'+(f.risk||f.severity||'')+'","'+getComplianceTags(f.name).join(';')+'","'+(f.target||'')+'","'+(remediatedItems.includes(f.name)?'Yes':'No')+'","'+rem.priority+'","'+rem.effort+'"');
+const rem=getRemediation(f.title||f.name);
+const _lbl=f.title||f.name||'';csv.push('"'+_lbl+'","'+(f.severity||f.risk||'')+'","'+getComplianceTags(_lbl).join(';')+'","'+(f.target||'')+'","'+(remediatedItems.includes(_lbl)?'Yes':'No')+'","'+rem.priority+'","'+rem.effort+'"');
 });
 const b=new Blob([csv.join('\n')],{type:'text/csv'});
 const a=document.createElement('a');

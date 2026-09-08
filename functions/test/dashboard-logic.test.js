@@ -180,3 +180,31 @@ test("ATT&CK coverage panel is graceful when findings have no technique ids", as
   const grid = elements.get("attack-grid");
   assert.ok(grid._html.includes("No ATT&CK-mapped techniques"));
 });
+
+test("dashboard renders engine-shaped findings (title/detail, no name) as live data", async () => {
+  // Real Read-API findings use `title`/`detail`/`severity` and carry NO `name`.
+  // Regression: previously getRemediation(undefined) threw -> demo fallback, so the client
+  // saw demo data instead of their scan. The list must now show the real titles.
+  const scans = [
+    {
+      scan_id: "s1", target: "https://acme.example",
+      summary: { high_count: 1, medium_count: 1 },
+      findings: [
+        { title: "Missing HSTS", detail: "Strict-Transport-Security not set",
+          severity: "high", attack: ["T1190"], evidence: { tactic: "initial-access" },
+          remediation_key: "missing-hsts" },
+        { title: "Undetected Technique: LSASS", detail: "cred dump", severity: "high",
+          attack: ["T1003"], evidence: { tactic: "credential-access" } },
+      ],
+    },
+  ];
+  const { state, elements } = loadDashboard({ search: "?client=acme-corp", scans });
+  await new Promise((r) => setTimeout(r, 20));
+  // LIVE, not demo: exactly the two ingested findings (demo set is 8).
+  assert.equal(state().allFindings.length, 2);
+  const list = elements.get("findings-list");
+  assert.ok(list._html.includes("Missing HSTS"), "real title rendered");
+  assert.ok(!list._html.includes("Unknown Finding"), "no unknown-finding placeholder");
+  // Compliance mapping resolves from the title (Missing HSTS -> a real mapping, not default).
+  assert.ok(list._html.includes("compliance-tag"), "compliance tags rendered");
+});
