@@ -200,7 +200,7 @@ input[type=checkbox]{width:18px;height:18px;accent-color:var(--purple);cursor:po
 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
 10-Model AI Consensus Engine
 </h2>
-<span class="ai-engine-badge"><span class="pulse"></span> Analyzing Findings</span>
+<span class="ai-engine-badge" id="ai-engine-badge"><span class="pulse"></span> Awaiting analysis</span>
 </div>
 <div class="models-grid">
 <div class="model-card"><span class="provider google">Google</span><div class="model-name">Gemini 2.5</div><div class="status">✓ Active</div></div>
@@ -281,7 +281,7 @@ input[type=checkbox]{width:18px;height:18px;accent-color:var(--purple);cursor:po
 <script>
 // Data source: the self-hosted, tenant-scoped Read API (Firebase retired). Base URL is
 // same-origin by default; override with <meta name="asp-api-base" content="https://...">.
-let allFindings=[],trendChart,catalogRemediation={},remediatedItems=JSON.parse(localStorage.getItem('remediated')||'[]');
+let allFindings=[],trendChart,catalogRemediation={},consensusSummary=null,remediatedItems=JSON.parse(localStorage.getItem('remediated')||'[]');
 
 // Enhanced compliance mapping
 const complianceMap={
@@ -513,6 +513,8 @@ document.getElementById('critical-high-count').textContent=tH;
 document.getElementById('ai-finding-count').textContent=allFindings.length;
 updateRiskScore(tH,tM,tL);
 updateComplianceCounts();
+consensusSummary=summarizeConsensus(scans);
+renderConsensus();
 renderFindingsList();
 renderAttackCoverage();
 renderTrendChart(scans);
@@ -556,6 +558,45 @@ document.getElementById('iso-count').textContent=c.iso;
 document.getElementById('cmmc-count').textContent=c.cmmc;
 }
 
+function summarizeConsensus(scans){
+// scan.consensus is the AI consensus result the pipeline stores: a ConsensusResult object
+// (or a list, one per finding). Summarize honest counts; null if no analysis is attached.
+const results=[];
+(scans||[]).forEach(s=>{
+const c=s&&s.consensus;
+if(!c)return;
+(Array.isArray(c)?c:[c]).forEach(r=>{if(r&&typeof r==='object')results.push(r);});
+});
+if(!results.length)return null;
+let total=0,ok=0,high=0;
+results.forEach(r=>{
+total=Math.max(total,Number(r.total_models)||0);
+ok+=Number(r.successful_models)||0;
+const sev=String(r.consensus_severity||'').toUpperCase();
+if(sev==='CRITICAL'||sev==='HIGH')high++;
+});
+return {analyzed:results.length,total_models:total,responded:Math.round(ok/results.length),high:high};
+}
+
+function consensusNoteText(){
+if(consensusSummary){
+const c=consensusSummary;
+return 'This scan\u2019s findings were analyzed by the AI consensus engine \u2014 up to '+c.total_models+' models, '+c.responded+' responding on average, '+c.high+' rated high or critical. Remediation above is consensus-validated where available.';
+}
+return 'AI consensus analysis was not attached to this scan; the remediation above is drawn from the Iron City control catalog.';
+}
+
+function renderConsensus(){
+const badge=document.getElementById('ai-engine-badge');
+if(!badge)return;
+if(consensusSummary){
+const c=consensusSummary;
+badge.innerHTML='<span class="pulse"></span> '+c.responded+'/'+c.total_models+' models responded';
+}else{
+badge.innerHTML='<span class="pulse" style="background:var(--muted)"></span> Consensus not run';
+}
+}
+
 function renderAttackCoverage(){
 const grid=document.getElementById('attack-grid');
 if(!grid)return;
@@ -593,6 +634,7 @@ container.innerHTML='<div style="text-align:center;padding:40px;color:var(--mute
 return;
 }
 
+const consensusNote=consensusNoteText();
 container.innerHTML=f.slice(0,50).map((x,i)=>{
 // Findings from the engine/adapters use `title`/`detail`; the legacy/demo shape used
 // `name`/`description`. Accept both so real ingested findings render correctly.
@@ -641,7 +683,7 @@ ${rem.frameworks.map(fw=>`<div class="compliance-impact-item"><div class="framew
 </div>
 <div class="ai-insight">
 <h4>🤖 AI Consensus Analysis</h4>
-<p>Our 10-model AI consensus engine analyzed this finding across multiple perspectives. <strong>9/10 models agree</strong> this requires immediate attention based on exploitability and business impact. The recommended remediation has been validated against current security best practices and your technology stack.</p>
+<p>${esc(consensusNote)}</p>
 <div class="ai-models-used">
 <span class="ai-model-tag">Gemini 2.5</span>
 <span class="ai-model-tag">Claude Haiku</span>
@@ -746,6 +788,8 @@ document.getElementById('critical-high-count').textContent='3';
 document.getElementById('ai-finding-count').textContent=demo.length;
 updateRiskScore(3,3,1);
 updateComplianceCounts();
+consensusSummary=null;
+renderConsensus();
 renderFindingsList();
 renderAttackCoverage();
 renderTrendChart([

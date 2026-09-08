@@ -238,3 +238,41 @@ test("dashboard remediation prefers the finding's remediation_key -> shared cata
   assert.ok(list._html.includes("CATALOG-STEP: send the HSTS header"),
     "catalog remediation step rendered via remediation_key");
 });
+
+test("consensus display is honest: real counts when present, no fabricated claim", async () => {
+  const scans = [
+    {
+      scan_id: "s1", target: "https://acme.example", summary: { high_count: 1 },
+      consensus: [
+        { consensus_severity: "HIGH", confidence_percent: 82, total_models: 10,
+          successful_models: 8, failed_models: 2 },
+      ],
+      findings: [
+        { title: "Undetected Technique", detail: "d", severity: "high", attack: ["T1003"],
+          evidence: { tactic: "credential-access" }, remediation_key: "missing-hsts" },
+      ],
+    },
+  ];
+  const { elements } = loadDashboard({ search: "?client=acme-corp", scans });
+  await new Promise((r) => setTimeout(r, 30));
+  const badge = elements.get("ai-engine-badge");
+  const list = elements.get("findings-list");
+  assert.match(badge._html, /8\/10 models responded/);
+  assert.ok(list._html.includes("AI consensus engine"), "honest consensus note rendered");
+  assert.ok(!/9\/10 models agree/.test(list._html), "no fabricated agreement claim");
+});
+
+test("consensus display is honest: neutral text when no consensus attached", async () => {
+  const scans = [
+    { scan_id: "s1", target: "t", summary: { high_count: 1 },
+      findings: [{ title: "F", detail: "d", severity: "high", attack: ["T1003"],
+                   evidence: { tactic: "credential-access" } }] },
+  ];
+  const { elements } = loadDashboard({ search: "?client=acme-corp", scans });
+  await new Promise((r) => setTimeout(r, 30));
+  const badge = elements.get("ai-engine-badge");
+  const list = elements.get("findings-list");
+  assert.match(badge._html, /Consensus not run/);
+  assert.ok(list._html.includes("was not attached to this scan"), "neutral note");
+  assert.ok(!/9\/10 models agree/.test(list._html), "no fabricated claim");
+});
