@@ -146,3 +146,65 @@ test("read API include=findings attaches each scan's findings (tenant-scoped)", 
   assert.equal(a2.findings.length, 1);
   assert.deepEqual(a2.findings[0].attack, ["T1190"]);
 });
+
+// ---- Env-gated: exercise the tenant-scoped read path against a REAL MariaDB ----------
+test("integration: Read API round-trips against a real MariaDB (ASP_MARIADB_URL)", async (t) => {
+  const url = process.env.ASP_MARIADB_URL;
+  if (!url) {
+    t.skip("ASP_MARIADB_URL not set — skipping live read-path integration");
+    return;
+  }
+  let mysql;
+  try {
+    mysql = require("mysql2/promise");
+  } catch {
+    t.skip("mysql2 not installed — skipping live read-path integration");
+    return;
+  }
+  const { createMariaDbStore } = require("../store/mariadb-store");
+  const { createStoreScanResultsHandler } = require("../handler");
+  const pool = await mysql.createPool(url);
+  try {
+    const handler = createStoreScanResultsHandler({ db: createMariaDbStore({ pool }) });
+    const sid = "ris-" + Date.now();
+
+    // Store a scan (with findings) for tenant "read-it", and one for a different tenant.
+    let r = makeRes();
+    await handler(makeReq({ body: {
+      client_name: "Read IT", scan_id: sid, status: "completed",
+      target: "https://r.test", summary: { high_count: 1 },
+      findings: [{ severity: "high", scenario: "s", title: "T", attack: ["T1190"],
+                   evidence: { tactic: "initial-access" }, remediation_key: "k" }],
+    } }), r);
+    assert.equal(r.body.status, "stored");
+    r = makeRes();
+    await handler(makeReq({ body: { client_name: "Other Co", scan_id: "other-1",
+                                    status: "completed", findings: [] } }), r);
+    assert.equal(r.body.status, "stored");
+
+    // listScans is tenant-scoped: only read-it rows, never the other tenant.
+    const scans = await listScans(pool, "read-it");
+    assert.ok(scans.some((s) => s.scan_id === sid), "own scan listed");
+    assert.ok(scans.every((s) => s.client_id === "read-it"), "no cross-tenant rows");
+
+    // getScan: real-MariaDB JSON columns deserialize back to objects/arrays.
+    const scan = await getScan(pool, "read-it", sid);
+    assert.equal(scan.status, "completed");
+    assert.equal(scan.summary.high_count, 1, "summary_json deserialized to object");
+    assert.equal(scan.findings.length, 1);
+    assert.deepEqual(scan.findings[0].attack, ["T1190"], "attack_json deserialized to array");
+
+    // listScans withFindings (the IN(...) batch load) attaches findings, tenant-scoped.
+    const withF = await listScans(pool, "read-it", { withFindings: true });
+    const mine = withF.find((s) => s.scan_id === sid);
+    assert.equal(mine.findings.length, 1, "batch-loaded findings attached");
+
+    // A different tenant sees none of read-it's data.
+    const otherScans = await getScan(pool, "other-co", sid);
+    assert.equal(otherScans, null, "cross-tenant getScan returns null");
+
+    await pool.query("DELETE FROM scans WHERE client_id IN (?,?)", ["read-it", "other-co"]);
+  } finally {
+    await pool.end();
+  }
+});
