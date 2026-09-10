@@ -276,3 +276,22 @@ test("consensus display is honest: neutral text when no consensus attached", asy
   assert.ok(list._html.includes("was not attached to this scan"), "neutral note");
   assert.ok(!/9\/10 models agree/.test(list._html), "no fabricated claim");
 });
+
+test("finding checkbox cannot be broken out of by a hostile title (no inline onclick)", async () => {
+  const evil = "evil');alert(1);//";
+  const scans = [
+    { scan_id: "s1", target: "t", summary: { high_count: 1 },
+      findings: [{ title: evil, detail: "d", severity: "high", attack: ["T1003"],
+                   evidence: { tactic: "credential-access" } }] },
+  ];
+  const { elements } = loadDashboard({ search: "?client=acme-corp", scans });
+  await new Promise((r) => setTimeout(r, 30));
+  const html = elements.get("findings-list")._html;
+  // The remediation toggle no longer embeds the title in an inline onclick JS string.
+  assert.ok(!html.includes("toggleRemediatedItem(this,"), "no inline onclick embedding the key");
+  // The raw breakout sequence (with a literal quote) must not appear anywhere — every
+  // quote is HTML-entity-encoded, so it can never terminate a JS string / attribute.
+  assert.ok(!html.includes("');alert(1)"), "no unescaped breakout sequence");
+  // The key is carried safely as an escaped data attribute instead.
+  assert.ok(html.includes("data-finding-key="), "key carried as a data attribute");
+});

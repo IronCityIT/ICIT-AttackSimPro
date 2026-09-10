@@ -443,6 +443,20 @@ function apiBase(){try{const m=document.querySelector('meta[name="asp-api-base"]
 function getAuthToken(){try{return window.__ASP_TOKEN||sessionStorage.getItem('asp_token')||'';}catch(e){return '';}}
 loadDashboard();
 renderScenarioLibrary();
+// Remediation checkboxes use event delegation on the (persistent) findings-list container
+// rather than an inline onclick — so a finding title can never break out of a JS string.
+(function(){
+const c=document.getElementById('findings-list');
+if(!c||!c.addEventListener)return;
+c.addEventListener('click',function(e){
+const t=e.target;if(t&&t.classList&&t.classList.contains('rem-check'))e.stopPropagation();
+});
+c.addEventListener('change',function(e){
+const t=e.target;
+if(t&&t.classList&&t.classList.contains('rem-check'))
+toggleRemediatedItem(t,t.getAttribute('data-finding-key')||'');
+});
+})();
 
 // Output-encode any value before it reaches innerHTML.
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
@@ -650,7 +664,7 @@ const id='finding-'+i;
 return `
 <div class="finding-item ${r?'remediated':''}">
 <div class="finding-header" onclick="toggleRemediation('${id}')">
-<div class="checkbox-cell"><input type="checkbox" ${r?'checked':''} onclick="event.stopPropagation();toggleRemediatedItem(this,'${esc(key)}')"></div>
+<div class="checkbox-cell"><input type="checkbox" class="rem-check" ${r?'checked':''} data-finding-key="${esc(key)}"></div>
 <div class="finding-name">${esc(label)}<small>${esc(desc.substring(0,100))||'Click to view remediation guidance'}</small></div>
 <div><span class="severity-badge severity-${sev}">${sev}</span></div>
 <div class="compliance-tags">${tags.map(t=>'<span class="compliance-tag">'+t+'</span>').join('')}</div>
