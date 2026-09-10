@@ -1,0 +1,40 @@
+name: AttackSimPro - Engine Tests
+
+# PR-triggered verification for the simulation engine + ingest + dashboard logic. The repo
+# previously had CI only for the MariaDB store; the simcore engine (scenarios, adapters,
+# coverage), the node ingest handler, the curl smoke, and the loopback E2E were verified
+# only locally. This runs the full local gate (make gate) on every PR that touches them.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'simcore/**'
+      - 'functions/**'
+      - 'scripts/**'
+      - 'public/**'
+      - 'Makefile'
+      - '.github/workflows/engine-tests.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: Full local gate (lint + ingest + smoke + engine + E2E)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install engine dependency (PyYAML) + function deps
+        run: |
+          set -euo pipefail
+          pip install --quiet pyyaml
+          (cd functions && npm install --no-audit --no-fund)
+      - name: make gate
+        run: make gate
