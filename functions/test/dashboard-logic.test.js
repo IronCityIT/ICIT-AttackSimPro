@@ -37,6 +37,7 @@ function loadDashboard({ search = "", firestoreDocs = null, scans } = {}) {
       getContext() { return {}; },
       closest() { return fakeEl(); },
       appendChild() {},
+      click() {},
     };
     return el;
   }
@@ -82,8 +83,9 @@ function loadDashboard({ search = "", firestoreDocs = null, scans } = {}) {
     localStorage: { getItem: () => null, setItem() {} },
     location: { search },
     URLSearchParams,
-    URL,
-    Blob: function () {},
+    URL: Object.assign(function (...a) { return new URL(...a); },
+      { createObjectURL: () => "blob:test" }),
+    Blob: function (parts) { sandbox.__lastBlob = parts; },
     console: { info() {}, warn() {}, log() {}, error() {} },
     setTimeout,
   };
@@ -294,4 +296,64 @@ test("finding checkbox cannot be broken out of by a hostile title (no inline onc
   assert.ok(!html.includes("');alert(1)"), "no unescaped breakout sequence");
   // The key is carried safely as an escaped data attribute instead.
   assert.ok(html.includes("data-finding-key="), "key carried as a data attribute");
+});
+
+test("hostile severity/target from ingested findings cannot inject markup", async () => {
+  // Findings are stored verbatim by the ingest handler, so severity/target are
+  // untrusted. Previously both were interpolated raw into innerHTML (stored XSS).
+  const scans = [
+    { scan_id: "s1", target: "t", summary: { high_count: 1 },
+      findings: [{ title: "F", detail: "d",
+                   severity: 'high"><img src=x onerror=alert(1)>',
+                   target: "<script>alert(2)</script>", attack: ["T1003"],
+                   evidence: { tactic: "credential-access" } }] },
+  ];
+  const { elements } = loadDashboard({ search: "?client=acme-corp", scans });
+  await new Promise((r) => setTimeout(r, 30));
+  const html = elements.get("findings-list")._html;
+  assert.ok(!html.includes("<img src=x"), "severity markup not injected");
+  assert.ok(!html.includes("<script>alert(2)"), "target markup not injected");
+  assert.ok(html.includes("&lt;script&gt;alert(2)&lt;/script&gt;"), "target shown encoded");
+  // An unknown severity is normalised to a known class, never echoed into class=.
+  assert.ok(/severity-badge severity-info"/.test(html), "unknown severity -> info");
+});
+
+test("findings do not display hardcoded AI model names (white-label, no fabrication)", async () => {
+  const scans = [
+    { scan_id: "s1", target: "t", summary: { high_count: 1 },
+      findings: [{ title: "F", detail: "d", severity: "high", attack: ["T1003"],
+                   evidence: { tactic: "credential-access" } }] },
+  ];
+  const { elements } = loadDashboard({ search: "?client=acme-corp", scans });
+  await new Promise((r) => setTimeout(r, 30));
+  const html = elements.get("findings-list")._html;
+  assert.ok(!/Gemini|Claude|GPT-4o|Llama|\+6 more/.test(html),
+    "no hardcoded model list shown when the consensus contract carries none");
+});
+
+test("CSV export escapes quotes and neutralises spreadsheet formulas", async () => {
+  const scans = [
+    { scan_id: "s1", target: "t", summary: { high_count: 1 },
+      findings: [{ title: '=HYPERLINK("http://evil","x")', detail: "d", severity: "high",
+                   target: '@SUM(1)', attack: ["T1003"],
+                   evidence: { tactic: "credential-access" } }] },
+  ];
+  const { sandbox } = loadDashboard({ search: "?client=acme-corp", scans });
+  await new Promise((r) => setTimeout(r, 30));
+  sandbox.exportFindings();
+  const csv = sandbox.__lastBlob.join("");
+  const row = csv.split("\n")[1];
+  // RFC 4180 quote doubling + a leading apostrophe so =,+,-,@ cells stay text.
+  assert.ok(row.startsWith(`"'=HYPERLINK(""http://evil"",""x"")"`), row);
+  assert.ok(row.includes(`"'@SUM(1)"`), "target formula neutralised");
+});
+
+test("static page names no third-party AI models and claims no fixed model count", () => {
+  // The banner previously hardcoded ten vendor models, each marked "Active", that did not
+  // match the consensus-engine roster and were never checked. The live badge (real
+  // total_models/successful_models) is the only model-count surface.
+  const html = fs.readFileSync(path.join(__dirname, "..", "..", "public", "index.html"), "utf8");
+  assert.ok(!/gemini|claude|gpt-?4|llama|groq|mistral|qwen|deepseek|gemma/i.test(html),
+    "no AI vendor/model names on the client-facing page");
+  assert.ok(!/10-Model|10 AI models/.test(html), "no hardcoded model count");
 });
