@@ -223,3 +223,16 @@ drives both CLI and dashboard):
 115 automated checks green (65 engine + 25 ingest + 9 smoke + 16 E2E). Two defects
 found and fixed this pass (E1 hardened-fixture path fidelity; E2 all-refused exit code).
 Live consensus/Jenkins/Firestore/Auth0 remain BLOCKED on secrets — see `STATUS.md`.
+
+---
+
+# Dashboard sink sweep (2026-09-23, PR #13, commit ebabea5)
+
+| Finding | Root cause | Fix | Validation |
+|---|---|---|---|
+| Stored XSS via finding `severity` / `target` | ingest stores findings verbatim; dashboard interpolated both raw into `innerHTML` (severity inside `class=`) | `normSev()` allow-list; `esc()` on target, tags, all remediation fields | regression test (red→green) |
+| CSV export injection (CWE-1236) | quotes not doubled; `=`,`+`,`-`,`@` cells executed as formulas | `csvCell()`: RFC 4180 quoting + apostrophe prefix | regression test |
+| Fabricated AI model roster (integrity + white-label) | static banner named 10 vendor models "✓ Active", never checked, not the real engine roster; `ConsensusResult` has no model names | removed; only real `successful_models/total_models` shown | static-page test |
+
+`make gate` green; CI run 35908756938 green. The banner removal is flagged on PR #13
+for Bill to confirm (product copy decision).
