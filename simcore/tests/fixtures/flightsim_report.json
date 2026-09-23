@@ -1,0 +1,14 @@
+{
+  "operation": "Malicious Traffic Detection Test",
+  "host": "corp-host-07",
+  "modules": [
+    {"module": "c2", "destinations": ["1.2.3.4", "5.6.7.8"], "status": "success"},
+    {"module": "dga", "sent": 40, "status": "success"},
+    {"module": "dns-tunnel", "destinations": ["ns.evil.test"], "status": "success"},
+    {"module": "ssh-exfil", "sent": 12, "status": "success"},
+    {"module": "scan", "status": "success"},
+    {"module": "tor", "status": "failed"},
+    {"module": "custom-thing", "technique_id": "T1105", "tactic": "command-and-control", "status": "success"},
+    {"module": "miner"}
+  ]
+}

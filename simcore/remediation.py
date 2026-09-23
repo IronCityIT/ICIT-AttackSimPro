@@ -244,6 +244,24 @@ CATALOG: dict[str, dict[str, Any]] = {
         "effort": "High",
         "frameworks": ["NIST SC-7", "CIS 12.2", "PCI 1.2", "ISO A.13.1"],
     },
+    "network-traffic-undetected": {
+        "title": "Malicious network traffic was not detected",
+        "impact": "Synthetic malicious traffic (C2 beacon / DGA / DNS or ICMP tunneling / "
+        "data exfiltration) left the host without the network stack alerting. Real C2 or "
+        "exfiltration of this class would go unnoticed.",
+        "steps": [
+            "Confirm NDR / IDS / SIEM raised an alert for this traffic class; if not, it is "
+            "a detection gap.",
+            "Enforce egress filtering and DNS security (block/greylist newly-seen and "
+            "algorithmically-generated domains; restrict outbound to required destinations).",
+            "Add or tune detections for beaconing, DGA, and DNS/ICMP tunneling, then re-run "
+            "the simulation until the traffic is blocked or detected.",
+            "Track the technique in the network detection coverage matrix until confirmed.",
+        ],
+        "priority": "High",
+        "effort": "Medium",
+        "frameworks": ["MITRE ATT&CK", "NIST DE.CM", "CIS 13", "PCI 1.3"],
+    },
     "missing-permissions-policy": {
         "title": "Permissions-Policy not set",
         "impact": "Powerful browser features (camera, geolocation) are not "
