@@ -16,6 +16,7 @@ const { createStoreScanResultsHandler } = require("./handler");
 const { chooseStoreKind, createStore } = require("./store/select-store");
 const { createIngestServer } = require("./store/http-ingest");
 const { createReadHandler } = require("./store/read-api");
+const { authorizerFromEnv } = require("./store/auth0-authorizer");
 
 function buildServer(env = process.env, opts = {}) {
   const kind = chooseStoreKind(env);
@@ -28,8 +29,11 @@ function buildServer(env = process.env, opts = {}) {
   const dumpStore = kind === "memory" && store.db._dump ? () => store.db._dump() : undefined;
   // Tenant-scoped Read API when a real pool backs the store. Fail-closed: without an
   // injected `authorize` strategy (Auth0 -> client_id+role token), it denies every read.
+  // Auth: an injected authorize wins (tests); otherwise build one from env (Auth0 JWKS).
+  // When neither is configured the Read API stays deny-by-default (fail-closed).
+  const authorize = opts.authorize || authorizerFromEnv(env);
   const readHandler = store.pool
-    ? createReadHandler({ pool: store.pool, authorize: opts.authorize })
+    ? createReadHandler({ pool: store.pool, authorize })
     : undefined;
   const server = createIngestServer(handler, { dumpStore, readHandler });
   return { server, store, kind };
