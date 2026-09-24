@@ -236,3 +236,16 @@ Live consensus/Jenkins/Firestore/Auth0 remain BLOCKED on secrets — see `STATUS
 
 `make gate` green; CI run 35908756938 green. The banner removal is flagged on PR #13
 for Bill to confirm (product copy decision).
+
+---
+
+# Stack re-sync: #13 fixes carried forward (2026-09-24)
+
+| Item | Detail |
+|---|---|
+| Failure | #14–#18 (`asp-nas-ci` … `asp-nas-deploy`) branched from #13 **before** its 8 self-review fixes (title crash, remediation source, fabricated consensus, DOM-XSS, stored-XSS, CSV injection, model roster, coverage). The stack tip — the branch that becomes the deployed image — shipped the vulnerable dashboard. |
+| Root cause | Fixes were committed to #13 only; stacked PRs don't pick up base-branch commits automatically. |
+| Fix | Merged forward in order (13→14→15→16→17→18) with non-force merge commits. No conflicts; the only file with a diff at the tip is `public/index.html` + its tests. |
+| Validation | Local `make gate` on tip: node 75 pass / 2 skip (live-DB, env-gated), engine 65, smoke, E2E 16/16. CI green on every re-synced branch; tip: Engine Tests 36006016756, Store Integration (real MariaDB) 36006016755. |
+
+Rule going forward: after any fix on a mid-stack PR, merge forward to the tip before recording done.
