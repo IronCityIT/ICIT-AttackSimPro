@@ -1,0 +1,29 @@
+# Production image for the self-hosted AttackSim Pro ingest + Read API service.
+# Runs server.js (handler.js over HTTP) backed by MariaDB on NAS-backed infra — Firebase
+# is retired, so this image carries NO firebase-admin/firebase-functions and no index.js.
+# GitHub Actions posts to it at STORE_SCAN_RESULTS_URL; the dashboard reads it via the
+# tenant-scoped Read API. Build:  docker build -f functions/Dockerfile.prod functions
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Only runtime dependency: the MariaDB driver for the ASP_STORE=mariadb path. Installed in
+# an isolated app dir so the retired firebase-* packages never enter the image.
+RUN npm install --omit=dev --no-audit --no-fund mysql2@^3 \
+  && npm cache clean --force
+
+# Application sources actually used by server.js (no index.js / firebase).
+COPY handler.js server.js ./
+COPY store ./store
+COPY testkit ./testkit
+
+ENV PORT=8088
+# ASP_STORE defaults to memory; production sets ASP_STORE=mariadb + ASP_MARIADB_URL.
+EXPOSE 8088
+
+# Liveness on the handler's own /healthz route.
+HEALTHCHECK --interval=15s --timeout=3s --retries=3 \
+  CMD wget -q -O- http://127.0.0.1:8088/healthz || exit 1
+
+USER node
+CMD ["node", "server.js"]

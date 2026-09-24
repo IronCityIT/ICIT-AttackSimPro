@@ -3,8 +3,8 @@
 # This runs the EXACT production handler (handler.js) against an in-memory
 # Firestore double via local-server.js — no GCP credentials, no external
 # dependencies, no network egress. It is for local development, smoke testing,
-# and demos. Production ingest runs as a Cloud Function (see index.js +
-# ../.github/workflows/deploy-functions.yml), NOT from this image.
+# and demos. The PRODUCTION self-hosted image is Dockerfile.prod (runs server.js backed
+# by MariaDB); this in-memory image is dev/test only. Firebase is retired.
 FROM node:20-alpine
 
 WORKDIR /app

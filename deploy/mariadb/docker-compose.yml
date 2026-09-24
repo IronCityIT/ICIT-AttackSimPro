@@ -34,6 +34,7 @@ services:
   ingest:
     build:
       context: ../../functions
+      dockerfile: Dockerfile.prod
     image: attacksimpro-ingest:nas
     restart: unless-stopped
     depends_on:

@@ -86,3 +86,34 @@ jobs:
           echo "restored rows for dr-test: $N"
           test "$N" = "1"
           echo "DR verify OK: backup + restore round-tripped the row"
+
+  container-build:
+    name: Build + smoke the production container
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the production image (server.js + mysql2, no firebase)
+        run: docker build -f functions/Dockerfile.prod -t asp-ingest:ci functions
+      - name: Run the container (in-memory store) and smoke it
+        run: |
+          set -euo pipefail
+          docker run -d --name asp -p 8088:8088 -e INGEST_TOKEN=citok -e ASP_STORE=memory asp-ingest:ci
+          for i in $(seq 1 20); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8088/healthz || true)
+            [ "$code" = "200" ] && { echo "healthz ok after ${i}"; break; }
+            sleep 2
+          done
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8088/healthz)" = "200"
+          # token gate: unauthenticated POST is rejected
+          test "$(curl -s -o /dev/null -w '%{http_code}' -XPOST http://127.0.0.1:8088/ -d '{}')" = "401"
+          # authenticated ingest stores
+          code=$(curl -s -o /tmp/r -w '%{http_code}' -XPOST http://127.0.0.1:8088/ \
+            -H 'Content-Type: application/json' -H 'X-Ingest-Token: citok' \
+            --data '{"client_name":"CI Client","scan_id":"c1","status":"completed","findings":[]}')
+          echo "ingest response: $code $(cat /tmp/r)"
+          test "$code" = "200"
+          grep -q '"status":"stored"' /tmp/r
+          echo "container smoke OK"
+          docker logs asp 2>&1 | tail -10
+          docker rm -f asp >/dev/null
