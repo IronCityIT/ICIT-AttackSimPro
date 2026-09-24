@@ -64,3 +64,25 @@ jobs:
       - name: Run the store test suite against real MariaDB
         working-directory: functions
         run: npm test
+
+      - name: Verify backup + restore (DR) against real MariaDB
+        env:
+          MARIADB_HOST: 127.0.0.1
+          MARIADB_USER: root
+          MARIADB_PASSWORD: root_${{ github.run_id }}
+          MARIADB_DATABASE: attacksimpro
+          ASP_BACKUP_DIR: ${{ runner.temp }}/asp-backups
+        run: |
+          set -euo pipefail
+          Q() { mysql -h 127.0.0.1 -u root -p"root_${{ github.run_id }}" "$@"; }
+          # Seed a known row, back it up, delete it, restore, and prove it came back.
+          Q attacksimpro -e "INSERT INTO clients (client_id, client_name) VALUES ('dr-test','DR Test');"
+          sh deploy/mariadb/backup.sh
+          DUMP=$(ls -1t "$ASP_BACKUP_DIR"/asp-attacksimpro-*.sql.gz | head -1)
+          test -s "$DUMP" && echo "dump: $DUMP"
+          Q attacksimpro -e "DELETE FROM clients WHERE client_id='dr-test';"
+          sh deploy/mariadb/restore.sh "$DUMP"
+          N=$(Q -N -e "SELECT COUNT(*) FROM attacksimpro.clients WHERE client_id='dr-test';")
+          echo "restored rows for dr-test: $N"
+          test "$N" = "1"
+          echo "DR verify OK: backup + restore round-tripped the row"
