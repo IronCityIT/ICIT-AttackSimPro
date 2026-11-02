@@ -1,0 +1,8 @@
+# Lint/format for tools/ and tests/ (the consensus hand-off).
+line-length = 120
+target-version = "py311"
+
+[lint]
+select = ["E", "F", "W", "B", "S", "UP"]
+# assert is the test idiom; subprocess runs only our own CLI in tests.
+per-file-ignores = { "tests/*" = ["S101", "S603"] }
