@@ -3,11 +3,14 @@
   "description": "Iron City AttackSimPro Cloud Functions (storeScanResults ingest)",
   "version": "1.0.0",
   "private": true,
-  "engines": { "node": "20" },
+  "engines": {
+    "node": "20"
+  },
   "main": "index.js",
   "scripts": {
     "lint": "echo \"no lint configured\" && exit 0",
-    "deploy": "echo \"Deploy runs in .github/workflows/deploy-functions.yml\" && exit 1"
+    "deploy": "echo \"Deploy runs in .github/workflows/deploy-functions.yml\" && exit 1",
+    "test": "node --test"
   },
   "dependencies": {
     "firebase-admin": "^12.0.0",
