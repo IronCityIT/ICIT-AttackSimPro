@@ -30,28 +30,24 @@ body{font-family:'Inter',sans-serif;background:var(--dark);color:var(--text);min
 .ai-engine-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:16px}
 .ai-engine-title{font-size:1.4rem;color:var(--gold);display:flex;align-items:center;gap:12px}
 .ai-engine-title svg{width:28px;height:28px}
-.ai-engine-badge{background:linear-gradient(135deg,var(--purple),#7b2cbf);color:#fff;padding:8px 16px;border-radius:20px;font-size:.85rem;font-weight:600;display:flex;align-items:center;gap:8px}
-.ai-engine-badge .pulse{width:8px;height:8px;background:#2ed573;border-radius:50%;animation:pulse 2s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-.models-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px}
-.model-card{background:rgba(0,0,0,.3);border-radius:10px;padding:12px;text-align:center;border:1px solid var(--border);transition:all .2s}
-.model-card:hover{border-color:var(--purple);transform:translateY(-2px)}
-.model-card .provider{font-size:.65rem;padding:2px 8px;border-radius:10px;margin-bottom:6px;display:inline-block;font-weight:600}
-.model-card .provider.google{background:rgba(66,133,244,.2);color:#4285f4}
-.model-card .provider.anthropic{background:rgba(212,175,55,.2);color:#d4af37}
-.model-card .provider.openai{background:rgba(16,163,127,.2);color:#10a37f}
-.model-card .provider.groq{background:rgba(244,114,22,.2);color:#f47216}
-.model-card .provider.meta{background:rgba(0,122,255,.2);color:#007aff}
-.model-card .provider.mistral{background:rgba(255,102,0,.2);color:#ff6600}
-.model-card .provider.deepseek{background:rgba(102,51,153,.2);color:#9966cc}
-.model-card .provider.alibaba{background:rgba(255,106,0,.2);color:#ff6a00}
-.model-card .model-name{font-size:.75rem;color:var(--text);font-weight:500}
-.model-card .status{font-size:.65rem;color:var(--low);margin-top:4px}
-.ai-summary{background:rgba(0,0,0,.3);border-radius:12px;padding:20px;margin-top:20px;border-left:4px solid var(--gold)}
-.ai-summary h4{color:var(--gold);margin-bottom:12px;font-size:.95rem}
-.ai-summary p{color:var(--muted);line-height:1.7;font-size:.9rem}
-.ai-summary .highlight{color:var(--gold);font-weight:600}
 
+.ai-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.ai-stat{background:rgba(0,0,0,.3);border-radius:10px;padding:16px;text-align:center;border:1px solid var(--border)}
+.ai-stat-value{font-size:1.6rem;font-weight:700;color:var(--gold)}
+.ai-stat-label{font-size:.75rem;color:var(--muted);text-transform:uppercase;margin-top:4px}
+.ai-unavailable{background:rgba(255,165,2,.08);border:1px solid var(--medium);border-radius:12px;padding:16px 20px;margin-bottom:16px}
+.ai-unavailable h4{color:var(--medium);font-size:.9rem;margin-bottom:4px}
+.scanner-guidance{color:var(--text);font-size:.9rem;line-height:1.6;white-space:pre-wrap}
+.muted{color:var(--muted);font-size:.85rem;line-height:1.6}
+.sub-heading{color:var(--muted);font-size:.8rem;margin:16px 0 8px}
+.verification-steps,.references{list-style:disc;padding-left:20px;color:var(--text);font-size:.85rem;line-height:1.7}
+.references{word-break:break-all;margin-top:12px}
+.metric-row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.metric{background:rgba(157,78,221,.1);padding:8px 16px;border-radius:8px}
+.metric-label{color:var(--muted);font-size:.75rem}
+.metric-value{font-weight:600}
+.empty-state{text-align:center;padding:40px;color:var(--muted)}
+pre.code-block{white-space:pre-wrap}
 .exec-summary{background:linear-gradient(135deg,rgba(157,78,221,.1),rgba(58,134,255,.1));border:1px solid var(--purple);border-radius:16px;padding:24px;margin:24px 0}
 .exec-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:16px}
 .exec-title{font-size:1.4rem;color:var(--gold)}
@@ -141,8 +137,6 @@ input[type=checkbox]{width:18px;height:18px;accent-color:var(--purple);cursor:po
 .ai-insight{background:linear-gradient(135deg,rgba(157,78,221,.1),rgba(212,175,55,.05));border:1px solid var(--purple);border-radius:12px;padding:20px;margin-top:20px}
 .ai-insight h4{color:var(--purple);font-size:.9rem;margin-bottom:12px;display:flex;align-items:center;gap:8px}
 .ai-insight p{color:var(--muted);font-size:.85rem;line-height:1.7}
-.ai-models-used{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
-.ai-model-tag{padding:4px 10px;border-radius:12px;font-size:.7rem;background:rgba(157,78,221,.2);color:var(--purple)}
 .compliance-impact{margin-top:16px}
 .compliance-impact h5{color:var(--muted);font-size:.8rem;margin-bottom:8px}
 .compliance-impact-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(80px,1fr));gap:8px}
@@ -158,7 +152,7 @@ input[type=checkbox]{width:18px;height:18px;accent-color:var(--purple);cursor:po
 @media(max-width:768px){
 .finding-header{grid-template-columns:40px 1fr 80px 40px;gap:8px}
 .finding-header .compliance-tags,.finding-header .finding-target{display:none}
-.models-grid{grid-template-columns:repeat(auto-fit,minmax(100px,1fr))}
+.ai-stats{grid-template-columns:1fr}
 }
 </style>
 </head>
@@ -173,30 +167,18 @@ input[type=checkbox]{width:18px;height:18px;accent-color:var(--purple);cursor:po
 
 <main class="container">
 
-<!-- AI Consensus Engine Banner -->
-<section class="ai-engine-banner">
+<!-- AI Consensus Banner: real counts from stored analyses, hidden when there are none -->
+<section class="ai-engine-banner" id="ai-engine-banner" hidden>
 <div class="ai-engine-header">
 <h2 class="ai-engine-title">
 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-10-Model AI Consensus Engine
+AI Consensus Analysis
 </h2>
-<span class="ai-engine-badge"><span class="pulse"></span> Analyzing Findings</span>
 </div>
-<div class="models-grid">
-<div class="model-card"><span class="provider google">Google</span><div class="model-name">Gemini 2.5</div><div class="status">✓ Active</div></div>
-<div class="model-card"><span class="provider anthropic">Anthropic</span><div class="model-name">Claude Haiku</div><div class="status">✓ Active</div></div>
-<div class="model-card"><span class="provider openai">OpenAI</span><div class="model-name">GPT-4o-mini</div><div class="status">✓ Active</div></div>
-<div class="model-card"><span class="provider groq">Groq</span><div class="model-name">Llama 3.3 70B</div><div class="status">✓ Active</div></div>
-<div class="model-card"><span class="provider meta">Meta</span><div class="model-name">Llama 3.1 8B</div><div class="status">✓ Active</div></div>
-<div class="model-card"><span class="provider groq">Groq</span><div class="model-name">Llama 3.1 70B</div><div class="status">✓ Active</div></div>
-<div class="model-card"><span class="provider mistral">Mistral</span><div class="model-name">Mistral Large</div><div class="status">✓ Active</div></div>
-<div class="model-card"><span class="provider google">Google</span><div class="model-name">Gemma 2 27B</div><div class="status">✓ Active</div></div>
-<div class="model-card"><span class="provider alibaba">Alibaba</span><div class="model-name">Qwen 2.5 72B</div><div class="status">✓ Active</div></div>
-<div class="model-card"><span class="provider deepseek">DeepSeek</span><div class="model-name">DeepSeek V3</div><div class="status">✓ Active</div></div>
-</div>
-<div class="ai-summary">
-<h4>🤖 AI Security Analysis Summary</h4>
-<p id="ai-summary-text">Analyzing <span class="highlight" id="ai-finding-count">0</span> security findings across your attack surface. Our consensus engine cross-references vulnerabilities against <span class="highlight">10 AI models</span> to provide accurate remediation guidance, reducing false positives and prioritizing critical fixes. Click any finding below to view <span class="highlight">AI-powered remediation steps</span>.</p>
+<div class="ai-stats">
+<div class="ai-stat"><div class="ai-stat-value" id="ai-findings-analysed">--</div><div class="ai-stat-label">Findings analysed</div></div>
+<div class="ai-stat"><div class="ai-stat-value" id="ai-models-ok">--</div><div class="ai-stat-label">Model responses succeeded</div></div>
+<div class="ai-stat"><div class="ai-stat-value" id="ai-unavailable-scans">--</div><div class="ai-stat-label">Assessments without AI analysis</div></div>
 </div>
 </section>
 
@@ -252,7 +234,8 @@ input[type=checkbox]{width:18px;height:18px;accent-color:var(--purple);cursor:po
 const firebaseConfig={apiKey:"AIzaSyAlbrFkibWK4XVCYaGISkVvbHF1ElVrUKU",authDomain:"ironcity-attacksimpro.firebaseapp.com",projectId:"ironcity-attacksimpro",storageBucket:"ironcity-attacksimpro.firebasestorage.app",messagingSenderId:"43248247502",appId:"1:43248247502:web:e51db50ad505c36da0a69f"};
 let db,allFindings=[],trendChart,remediatedItems=JSON.parse(localStorage.getItem('remediated')||'[]');
 
-// Enhanced compliance mapping
+// Keyword control mapping for the header tags and the compliance counts. A
+// finding's own AI-mapped frameworks take precedence when it has them.
 const complianceMap={
 'sql injection':['OWASP A03','CIS 16.1','PCI 6.5.1','HIPAA 164.312','NIST PR.DS-5'],
 'xss':['OWASP A03','CIS 16.4','PCI 6.5.7','NIST PR.DS-5'],
@@ -261,6 +244,7 @@ const complianceMap={
 'strict-transport-security':['OWASP A05','CIS 9.2','PCI 4.1'],
 'missing csp':['OWASP A05','CIS 9.2','NIST PR.DS-5'],
 'content-security-policy':['OWASP A05','CIS 9.2','NIST PR.DS-5'],
+'content security policy':['OWASP A05','CIS 9.2','NIST PR.DS-5'],
 'missing x-frame':['OWASP A05','CIS 9.2','ISO A.14.1.2'],
 'x-frame-options':['OWASP A05','CIS 9.2'],
 'cookie':['OWASP A05','CIS 16.3','PCI 6.5.10'],
@@ -275,110 +259,47 @@ const complianceMap={
 'injection':['OWASP A03','PCI 6.5.1','NIST PR.DS-5']
 };
 
-// Remediation guidance database
-const remediationDB={
-'missing content-security-policy':{
-priority:'High',
-effort:'Medium',
-steps:['Add CSP header to server configuration','Start with report-only mode to test','Define allowed sources for scripts, styles, images','Remove inline scripts and styles','Test thoroughly before enforcing'],
-code:"# Nginx\nadd_header Content-Security-Policy \"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';\" always;\n\n# Apache\nHeader always set Content-Security-Policy \"default-src 'self';\"",
-impact:'Prevents XSS attacks by controlling resource loading. Critical for PCI DSS compliance.',
-frameworks:['OWASP A05','CIS 9.2','PCI 6.5.7','NIST PR.DS-5']
-},
-'missing x-frame-options':{
-priority:'Medium',
-effort:'Low',
-steps:['Add X-Frame-Options header to server config','Set to DENY or SAMEORIGIN based on needs','Test embedded content still works if needed','Consider using CSP frame-ancestors instead'],
-code:"# Nginx\nadd_header X-Frame-Options \"SAMEORIGIN\" always;\n\n# Apache\nHeader always set X-Frame-Options \"SAMEORIGIN\"",
-impact:'Prevents clickjacking attacks. Required for SOC 2 and ISO 27001.',
-frameworks:['OWASP A05','CIS 9.2','ISO A.14.1.2','SOC2 CC6.6']
-},
-'missing hsts':{
-priority:'High',
-effort:'Low',
-steps:['Ensure site works fully on HTTPS first','Add HSTS header with appropriate max-age','Consider includeSubDomains if all subdomains support HTTPS','Add to browser preload list for maximum security','Test with online HSTS checker'],
-code:"# Nginx\nadd_header Strict-Transport-Security \"max-age=31536000; includeSubDomains; preload\" always;\n\n# Apache\nHeader always set Strict-Transport-Security \"max-age=31536000; includeSubDomains\"",
-impact:'Forces HTTPS connections, preventing downgrade attacks. Critical for PCI DSS 4.1.',
-frameworks:['PCI 4.1','HIPAA 164.312','NIST PR.DS-2','CMMC SC.3.185']
-},
-'cookie without secure flag':{
-priority:'Medium',
-effort:'Low',
-steps:['Identify all cookies set by application','Add Secure flag to each cookie','Add HttpOnly flag to prevent JS access','Consider SameSite attribute for CSRF protection','Test cookie functionality after changes'],
-code:"// Node.js/Express\nres.cookie('session', value, {\n  secure: true,\n  httpOnly: true,\n  sameSite: 'strict'\n});\n\n# PHP\nsetcookie('session', $value, [\n  'secure' => true,\n  'httponly' => true\n]);",
-impact:'Prevents cookie theft over insecure connections. Required for PCI DSS.',
-frameworks:['OWASP A05','CIS 16.3','PCI 6.5.10']
-},
-'server disclosure':{
-priority:'Low',
-effort:'Low',
-steps:['Remove or modify Server header','Disable version information in responses','Update error pages to not reveal stack traces','Review all headers for information leakage'],
-code:"# Nginx\nserver_tokens off;\nmore_clear_headers Server;\n\n# Apache\nServerTokens Prod\nServerSignature Off",
-impact:'Reduces information available to attackers. Supports defense in depth.',
-frameworks:['OWASP A01','CIS 18.3','NIST PR.IP-1']
-},
-'tls certificate expiring':{
-priority:'Critical',
-effort:'Medium',
-steps:['Renew certificate immediately through CA','Install new certificate on server','Verify certificate chain is complete','Set up automated renewal (Let\'s Encrypt)','Configure monitoring for expiration alerts'],
-code:"# Let's Encrypt auto-renewal\nsudo certbot renew --dry-run\n\n# Add to crontab\n0 0 1 * * certbot renew --quiet",
-impact:'Expired certificates break HTTPS and user trust. Critical compliance issue.',
-frameworks:['PCI 4.1','HIPAA 164.312','SOC2 CC6.7','CMMC SC.3.185']
-},
-'sql injection':{
-priority:'Critical',
-effort:'High',
-steps:['Use parameterized queries/prepared statements','Implement input validation and sanitization','Apply principle of least privilege to DB accounts','Use ORM frameworks where possible','Conduct code review for all DB interactions'],
-code:"// Bad - vulnerable\nquery = \"SELECT * FROM users WHERE id = \" + userId;\n\n// Good - parameterized\nquery = \"SELECT * FROM users WHERE id = ?\";\nstmt.setInt(1, userId);",
-impact:'Prevents database compromise and data breach. Critical for all compliance frameworks.',
-frameworks:['OWASP A03','PCI 6.5.1','HIPAA 164.312','NIST PR.DS-5','CMMC SC.3.180']
-},
-'cross-site scripting':{
-priority:'High',
-effort:'Medium',
-steps:['Encode all user output appropriately','Implement Content-Security-Policy','Use modern frameworks with auto-escaping','Validate and sanitize all inputs','Use HttpOnly cookies to limit impact'],
-code:"// JavaScript - encode output\nfunction escapeHtml(text) {\n  return text.replace(/[&<>\"']/g, m => ({\n    '&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'\n  })[m]);\n}",
-impact:'Prevents session hijacking and data theft. High priority for web applications.',
-frameworks:['OWASP A03','CIS 16.4','PCI 6.5.7','NIST PR.DS-5']
-}
-};
+// There is deliberately no built-in remediation text. Remediation shown here is
+// the stored AI consensus for that finding, or - when there is none - an
+// explicit "unavailable" notice with the scanner's own guidance. A generic
+// answer presented as analysis is worse than an honest gap.
 
-// Default remediation for unknown findings
-const defaultRemediation={
-priority:'Medium',
-effort:'Medium',
-steps:['Review the finding details and affected components','Research the specific vulnerability type','Implement appropriate fix based on technology stack','Test the fix in staging environment','Deploy to production and verify'],
-code:'// Consult security documentation for specific remediation steps',
-impact:'Address this finding to improve overall security posture.',
-frameworks:['NIST PR.IP-1','CIS 4.1']
-};
+const FRAMEWORK_PREFIX={nist:'NIST',cis:'CIS',pci:'PCI',hipaa:'HIPAA',soc2:'SOC2',owasp:'OWASP',iso:'ISO',cmmc:'CMMC'};
 
-function getRemediation(name){
-const key=name.toLowerCase();
-for(const[k,v]of Object.entries(remediationDB)){
-if(key.includes(k))return v;
-}
-return defaultRemediation;
+function findingName(f){return f.name||f.title||f.alert||'Unnamed finding'}
+function findingSeverity(f){
+const s=String(f.severity||f.risk||'info').toLowerCase();
+return ['critical','high','medium','low','info'].includes(s)?s:'info';
 }
 
-function getComplianceTags(n){
-const name=(n||'').toLowerCase();
+function getComplianceTags(f){
+const ai=f&&f.ai_analysis;
+if(ai&&Array.isArray(ai.frameworks)&&ai.frameworks.length)return ai.frameworks.map(String);
+const name=findingName(f||{}).toLowerCase();
 for(const[k,v]of Object.entries(complianceMap)){
 if(name.includes(k))return v;
 }
 return['NIST ID.RA-1'];
 }
 
-try{firebase.initializeApp(firebaseConfig);db=firebase.firestore();loadDashboard()}catch(e){loadDemoData()}
+// Small DOM helper: every piece of stored text goes in through textContent.
+function el(tag,cls,text){
+const n=document.createElement(tag);
+if(cls)n.className=cls;
+if(text!==undefined&&text!==null)n.textContent=String(text);
+return n;
+}
+
+try{firebase.initializeApp(firebaseConfig);db=firebase.firestore();loadDashboard()}catch(e){showEmptyState('The assessment data could not be loaded.')}
 
 async function loadDashboard(){
 try{
 const snap=await db.collection('scans').orderBy('timestamp','desc').limit(20).get();
 const scans=[];
 snap.forEach(d=>scans.push({id:d.id,...d.data()}));
-if(!scans.length){loadDemoData();return}
+if(!scans.length){showEmptyState('No assessments have been stored yet.');return}
 processScans(scans);
-}catch(e){loadDemoData()}
+}catch(e){showEmptyState('The assessment data could not be loaded.')}
 }
 
 function processScans(scans){
@@ -390,7 +311,7 @@ tH+=(sum.critical_count||0)+(sum.high_count||0);
 tM+=sum.medium_count||0;
 tL+=sum.low_count||0;
 tI+=sum.info_count||0;
-(s.findings||[]).forEach(f=>allFindings.push({...f,target:s.target_url}));
+(s.findings||[]).forEach(f=>allFindings.push({...f,target:f.target||s.target||s.target_url}));
 });
 document.getElementById('high-count').textContent=tH;
 document.getElementById('medium-count').textContent=tM;
@@ -399,11 +320,31 @@ document.getElementById('info-count').textContent=tI;
 document.getElementById('total-scans').textContent=scans.length;
 document.getElementById('total-findings').textContent=allFindings.length;
 document.getElementById('critical-high-count').textContent=tH;
-document.getElementById('ai-finding-count').textContent=allFindings.length;
+renderConsensusBanner(scans);
 updateRiskScore(tH,tM,tL);
 updateComplianceCounts();
 renderFindingsList();
 renderTrendChart(scans);
+}
+
+// The banner states what the stored data says, or is hidden. Counts come from
+// each scan's consensus block, written by the scan workflow's store job.
+function renderConsensusBanner(scans){
+const banner=document.getElementById('ai-engine-banner');
+const analysed=allFindings.filter(f=>f.ai_analysis).length;
+let ok=0,total=0,unavailable=0;
+scans.forEach(s=>{
+const c=s.consensus;
+if(!c||typeof c!=='object')return;
+ok+=Number(c.models_succeeded)||0;
+total+=Number(c.models_total)||0;
+if(c.status==='unavailable')unavailable++;
+});
+if(!analysed){banner.hidden=true;return}
+banner.hidden=false;
+document.getElementById('ai-findings-analysed').textContent=analysed+' of '+allFindings.length;
+document.getElementById('ai-models-ok').textContent=total?ok+' of '+total:'--';
+document.getElementById('ai-unavailable-scans').textContent=unavailable;
 }
 
 function updateRiskScore(h,m,l){
@@ -423,92 +364,148 @@ el.querySelector('.risk-score-value').textContent=g;
 function updateComplianceCounts(){
 const c={nist:0,cis:0,pci:0,hipaa:0,soc2:0,owasp:0,iso:0,cmmc:0};
 allFindings.forEach(f=>{
-getComplianceTags(f.name).forEach(t=>{
-if(t.startsWith('NIST'))c.nist++;
-if(t.startsWith('CIS'))c.cis++;
-if(t.startsWith('PCI'))c.pci++;
-if(t.startsWith('HIPAA'))c.hipaa++;
-if(t.startsWith('SOC2'))c.soc2++;
-if(t.startsWith('OWASP'))c.owasp++;
-if(t.startsWith('ISO'))c.iso++;
-if(t.startsWith('CMMC'))c.cmmc++;
+getComplianceTags(f).forEach(t=>{
+const tag=String(t).toUpperCase().replace(/[^A-Z0-9]/g,'');
+for(const[k,p]of Object.entries(FRAMEWORK_PREFIX)){if(tag.startsWith(p))c[k]++}
 });
 });
-document.getElementById('nist-count').textContent=c.nist;
-document.getElementById('cis-count').textContent=c.cis;
-document.getElementById('pci-count').textContent=c.pci;
-document.getElementById('hipaa-count').textContent=c.hipaa;
-document.getElementById('soc2-count').textContent=c.soc2;
-document.getElementById('owasp-count').textContent=c.owasp;
-document.getElementById('iso-count').textContent=c.iso;
-document.getElementById('cmmc-count').textContent=c.cmmc;
+for(const k of Object.keys(c))document.getElementById(k+'-count').textContent=c[k];
+}
+
+function renderList(items,cls,numbered){
+const ul=el('ul',cls);
+items.forEach((s,j)=>{
+const li=el('li');
+if(numbered)li.appendChild(el('span','step-number',j+1));
+li.appendChild(el('span',null,s));
+ul.appendChild(li);
+});
+return ul;
+}
+
+function metric(label,value,color){
+const box=el('div','metric');
+box.appendChild(el('span','metric-label',label));
+const v=el('div','metric-value',value);
+if(color)v.style.color=color;
+box.appendChild(v);
+return box;
+}
+
+function cap(s){s=String(s||'');return s?s.charAt(0).toUpperCase()+s.slice(1):'--'}
+
+// Panel for a finding the AI consensus analysed. Only fields the store wrote
+// are shown; code, priority and effort appear only if the data carries them.
+function renderAnalysis(panel,ai){
+const grid=el('div','remediation-grid');
+
+const steps=el('div','remediation-section');
+steps.appendChild(el('h4',null,'Remediation Steps'));
+const rs=Array.isArray(ai.remediation_steps)?ai.remediation_steps:[];
+steps.appendChild(rs.length?renderList(rs,'remediation-steps',true):el('p','muted','The analysis returned no remediation steps.'));
+if(ai.code){steps.appendChild(el('pre','code-block',ai.code))}
+const vs=Array.isArray(ai.verification_steps)?ai.verification_steps:[];
+if(vs.length){
+steps.appendChild(el('h5','sub-heading','How to verify the fix'));
+steps.appendChild(renderList(vs,'verification-steps',false));
+}
+grid.appendChild(steps);
+
+const impact=el('div','remediation-section');
+impact.appendChild(el('h4',null,'Impact & Priority'));
+const row=el('div','metric-row');
+row.appendChild(metric('Impact',cap(ai.impact),'var(--high)'));
+row.appendChild(metric('Exploitability',cap(ai.exploitability),'var(--medium)'));
+row.appendChild(metric('AI severity',cap(ai.severity)+(ai.confidence_percent?' · '+ai.confidence_percent+'%':''),'var(--gold)'));
+if(ai.priority)row.appendChild(metric('Priority',cap(ai.priority),'var(--high)'));
+if(ai.effort)row.appendChild(metric('Effort',cap(ai.effort),'var(--purple)'));
+impact.appendChild(row);
+if(ai.audit_risk)impact.appendChild(el('p','muted','Audit risk: '+cap(ai.audit_risk)+(ai.breach_notification_risk?' · may trigger breach notification':'')));
+
+const comp=el('div','compliance-impact');
+comp.appendChild(el('h5',null,'Compliance Frameworks Affected'));
+const cg=el('div','compliance-impact-grid');
+const fws=Array.isArray(ai.frameworks)?ai.frameworks:[];
+const maps=ai.control_mappings&&typeof ai.control_mappings==='object'?ai.control_mappings:{};
+fws.forEach(fw=>{
+const item=el('div','compliance-impact-item');
+item.appendChild(el('div','framework',fw));
+const controls=Array.isArray(maps[fw])?maps[fw]:[];
+item.appendChild(el('div','control',controls.join(', ')));
+cg.appendChild(item);
+});
+if(!fws.length)cg.appendChild(el('p','muted','No framework mapping returned.'));
+comp.appendChild(cg);
+impact.appendChild(comp);
+grid.appendChild(impact);
+panel.appendChild(grid);
+
+const insight=el('div','ai-insight');
+insight.appendChild(el('h4',null,'AI Consensus Analysis'));
+const ok=Number(ai.models_succeeded)||0,total=Number(ai.models_total)||0;
+insight.appendChild(el('p',null,ok+' of '+total+' models returned an analysis of this finding. Consensus severity: '+cap(ai.severity)+(ai.confidence_percent?' at '+ai.confidence_percent+'% confidence':'')+'.'));
+panel.appendChild(insight);
+}
+
+// Panel for a finding with no AI analysis: say so, and show what the scanner
+// itself recommended. No stand-in advice.
+function renderUnavailable(panel,f){
+const box=el('div','ai-unavailable');
+box.appendChild(el('h4',null,'AI analysis unavailable for this finding'));
+box.appendChild(el('p','muted','Showing the scanner’s own guidance.'));
+panel.appendChild(box);
+const guide=el('div','remediation-section');
+guide.appendChild(el('h4',null,'Scanner guidance'));
+guide.appendChild(el('p','scanner-guidance',f.solution||'No scanner guidance was recorded for this finding.'));
+if(Array.isArray(f.references)&&f.references.length)guide.appendChild(renderList(f.references,'references',false));
+panel.appendChild(guide);
 }
 
 function renderFindingsList(filter='all'){
 const container=document.getElementById('findings-list');
-let f=allFindings;
-if(filter==='open')f=f.filter(x=>!remediatedItems.includes(x.name));
+container.replaceChildren();
+let list=allFindings;
+if(filter==='open')list=list.filter(x=>!remediatedItems.includes(findingName(x)));
+if(!list.length){container.appendChild(el('div','empty-state','No findings found'));return}
 
-if(!f.length){
-container.innerHTML='<div style="text-align:center;padding:40px;color:var(--muted)">No findings found</div>';
-return;
-}
-
-container.innerHTML=f.slice(0,50).map((x,i)=>{
-const r=remediatedItems.includes(x.name);
-const sev=(x.risk||x.severity||'info').toLowerCase();
-const tags=getComplianceTags(x.name).slice(0,4);
-const rem=getRemediation(x.name);
+list.slice(0,50).forEach((x,i)=>{
+const name=findingName(x);
+const done=remediatedItems.includes(name);
+const sev=findingSeverity(x);
 const id='finding-'+i;
 
-return `
-<div class="finding-item ${r?'remediated':''}">
-<div class="finding-header" onclick="toggleRemediation('${id}')">
-<div class="checkbox-cell"><input type="checkbox" ${r?'checked':''} onclick="event.stopPropagation();toggleRemediatedItem(this,'${x.name}')"></div>
-<div class="finding-name">${x.name||'Unknown Finding'}<small>${x.description?.substring(0,100)||'Click to view remediation guidance'}</small></div>
-<div><span class="severity-badge severity-${sev}">${sev}</span></div>
-<div class="compliance-tags">${tags.map(t=>'<span class="compliance-tag">'+t+'</span>').join('')}</div>
-<div class="finding-target">${x.target||x.host||'--'}</div>
-<div class="expand-icon">▼</div>
-</div>
-<div class="remediation-panel" id="${id}">
-<div class="remediation-grid">
-<div class="remediation-section">
-<h4><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg> Remediation Steps</h4>
-<ul class="remediation-steps">
-${rem.steps.map((s,j)=>`<li><span class="step-number">${j+1}</span><span>${s}</span></li>`).join('')}
-</ul>
-<div class="code-block">${rem.code.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
-</div>
-<div class="remediation-section">
-<h4><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg> Impact & Priority</h4>
-<p style="color:var(--text);margin-bottom:16px;line-height:1.6">${rem.impact}</p>
-<div style="display:flex;gap:12px;margin-bottom:16px">
-<div style="background:rgba(255,71,87,.1);padding:8px 16px;border-radius:8px"><span style="color:var(--muted);font-size:.75rem">Priority</span><div style="color:var(--high);font-weight:600">${rem.priority}</div></div>
-<div style="background:rgba(157,78,221,.1);padding:8px 16px;border-radius:8px"><span style="color:var(--muted);font-size:.75rem">Effort</span><div style="color:var(--purple);font-weight:600">${rem.effort}</div></div>
-</div>
-<div class="compliance-impact">
-<h5>Compliance Frameworks Affected</h5>
-<div class="compliance-impact-grid">
-${rem.frameworks.map(fw=>`<div class="compliance-impact-item"><div class="framework">${fw.split(' ')[0]}</div><div class="control">${fw.split(' ')[1]||''}</div></div>`).join('')}
-</div>
-</div>
-</div>
-</div>
-<div class="ai-insight">
-<h4>🤖 AI Consensus Analysis</h4>
-<p>Our 10-model AI consensus engine analyzed this finding across multiple perspectives. <strong>9/10 models agree</strong> this requires immediate attention based on exploitability and business impact. The recommended remediation has been validated against current security best practices and your technology stack.</p>
-<div class="ai-models-used">
-<span class="ai-model-tag">Gemini 2.5</span>
-<span class="ai-model-tag">Claude Haiku</span>
-<span class="ai-model-tag">GPT-4o-mini</span>
-<span class="ai-model-tag">Llama 3.3 70B</span>
-<span class="ai-model-tag">+6 more</span>
-</div>
-</div>
-</div>
-</div>`;
-}).join('');
+const item=el('div','finding-item'+(done?' remediated':''));
+const header=el('div','finding-header');
+header.addEventListener('click',()=>toggleRemediation(id));
+
+const cbCell=el('div','checkbox-cell');
+const cb=el('input');cb.type='checkbox';cb.checked=done;
+cb.addEventListener('click',ev=>{ev.stopPropagation();toggleRemediatedItem(cb,name)});
+cbCell.appendChild(cb);
+header.appendChild(cbCell);
+
+const nameCell=el('div','finding-name',name);
+nameCell.appendChild(el('small',null,(x.description||'').substring(0,100)||(x.ai_analysis?'Click to view AI remediation':'Click to view details')));
+header.appendChild(nameCell);
+
+const sevCell=el('div');
+sevCell.appendChild(el('span','severity-badge severity-'+sev,sev));
+header.appendChild(sevCell);
+
+const tags=el('div','compliance-tags');
+getComplianceTags(x).slice(0,4).forEach(t=>tags.appendChild(el('span','compliance-tag',t)));
+header.appendChild(tags);
+header.appendChild(el('div','finding-target',x.target||x.host||'--'));
+header.appendChild(el('div','expand-icon','▼'));
+item.appendChild(header);
+
+const panel=el('div','remediation-panel');
+panel.id=id;
+if(x.ai_analysis&&typeof x.ai_analysis==='object')renderAnalysis(panel,x.ai_analysis);
+else renderUnavailable(panel,x);
+item.appendChild(panel);
+container.appendChild(item);
+});
 
 document.getElementById('remediated-count').textContent=remediatedItems.length;
 }
@@ -549,11 +546,19 @@ cb.closest('.finding-item').classList.toggle('remediated',cb.checked);
 
 function filterFindings(f){renderFindingsList(f)}
 
+// CSV cell: quotes doubled, and a leading = + - @ neutralised so a stored
+// finding cannot become a spreadsheet formula.
+function csvCell(v){
+let s=String(v==null?'':v);
+if(/^[=+\-@\t\r]/.test(s))s="'"+s;
+return '"'+s.replace(/"/g,'""')+'"';
+}
+
 function exportFindings(){
-const csv=['Finding,Severity,Compliance,Target,Remediated,Priority,Effort'];
+const csv=['Finding,Severity,Compliance,Target,Remediated,AI analysis,AI severity,Impact,Models'];
 allFindings.forEach(f=>{
-const rem=getRemediation(f.name);
-csv.push('"'+(f.name||'')+'","'+(f.risk||f.severity||'')+'","'+getComplianceTags(f.name).join(';')+'","'+(f.target||'')+'","'+(remediatedItems.includes(f.name)?'Yes':'No')+'","'+rem.priority+'","'+rem.effort+'"');
+const ai=f.ai_analysis||null;
+csv.push([findingName(f),findingSeverity(f),getComplianceTags(f).join(';'),f.target||'',remediatedItems.includes(findingName(f))?'Yes':'No',ai?'Available':'Unavailable',ai?ai.severity:'',ai?ai.impact:'',ai?(ai.models_succeeded+'/'+ai.models_total):''].map(csvCell).join(','));
 });
 const b=new Blob([csv.join('\n')],{type:'text/csv'});
 const a=document.createElement('a');
@@ -580,36 +585,14 @@ options:{responsive:true,plugins:{legend:{labels:{color:'#fff'}}},scales:{y:{beg
 });
 }
 
-function loadDemoData(){
-const demo=[
-{name:'Missing Content-Security-Policy Header',risk:'medium',target:'example.com',description:'The Content-Security-Policy header is not set, allowing potential XSS attacks.'},
-{name:'Missing X-Frame-Options Header',risk:'medium',target:'example.com',description:'No clickjacking protection in place.'},
-{name:'Cookie Without Secure Flag',risk:'low',target:'example.com',description:'Session cookie transmitted over insecure connection.'},
-{name:'Missing HSTS Header',risk:'medium',target:'example.com',description:'Strict-Transport-Security header not configured.'},
-{name:'Server Disclosure',risk:'info',target:'example.com',description:'Server version information exposed in headers.'},
-{name:'TLS Certificate Expiring',risk:'high',target:'example.com',description:'SSL certificate expires in 14 days.'},
-{name:'SQL Injection Potential',risk:'critical',target:'example.com/search',description:'User input not properly sanitized in search parameter.'},
-{name:'Cross-Site Scripting (XSS)',risk:'high',target:'example.com/comments',description:'Reflected XSS vulnerability in comment field.'}
-];
-allFindings=demo;
-document.getElementById('high-count').textContent='3';
-document.getElementById('medium-count').textContent='3';
-document.getElementById('low-count').textContent='1';
-document.getElementById('info-count').textContent='1';
-document.getElementById('total-scans').textContent='5';
-document.getElementById('total-findings').textContent=demo.length;
-document.getElementById('critical-high-count').textContent='3';
-document.getElementById('ai-finding-count').textContent=demo.length;
-updateRiskScore(3,3,1);
+// No stored data: say so. The page used to fill itself with invented example
+// findings here, indistinguishable from a real assessment.
+function showEmptyState(message){
+document.getElementById('ai-engine-banner').hidden=true;
+const container=document.getElementById('findings-list');
+container.replaceChildren(el('div','empty-state',message));
+['high-count','medium-count','low-count','info-count','total-scans','total-findings','critical-high-count'].forEach(i=>{document.getElementById(i).textContent='0'});
 updateComplianceCounts();
-renderFindingsList();
-renderTrendChart([
-{summary:{critical_count:1,high_count:4,medium_count:8,low_count:10}},
-{summary:{critical_count:1,high_count:3,medium_count:6,low_count:8}},
-{summary:{critical_count:0,high_count:2,medium_count:4,low_count:5}},
-{summary:{critical_count:1,high_count:2,medium_count:3,low_count:2}},
-{summary:{critical_count:1,high_count:2,medium_count:3,low_count:1}}
-]);
 }
 </script>
 </body>
