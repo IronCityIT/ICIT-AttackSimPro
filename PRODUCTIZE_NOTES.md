@@ -137,3 +137,47 @@ architecture items in §2 before any live run.
 now satisfied for all 7. Gaps (b) trigger function and (c) dashboard→function wiring were
 **not audited in depth** here because the store-layer and consensus decisions in §2 gate
 them; they should be revisited once those land.
+
+---
+
+# fix/asp-consensus — real AI consensus on every finding (2026-11-02)
+
+Branch off `main`. NAS/MariaDB branches (#10–#18) untouched.
+
+## Contract wired to (read from `consensus-engine/.github/workflows/analyze.yml@main`)
+- `workflow_call` inputs: `findings_json` (base64 JSON), `product`, `client_id`, `scan_id`,
+  `api_url`, `post_to_api` (default false). Output: `consensus_b64`. Secrets, all optional:
+  `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `IRONCITY_API_KEY`.
+- The engine also uploads its result as artifact `consensus-result-<scan_id>`; the store job
+  reads **that file**, not `consensus_b64` through env (DNS Guard died on "Argument list too long").
+- Result shape: one `ConsensusResult` per input finding, same order, no id. Per finding:
+  `consensus_severity`, `confidence_percent`, `exploitability`, `impact`, `aggregated_remediation[]`,
+  `verification_steps[]`, `compliance_impact.{frameworks,control_domains,control_mappings,audit_risk}`,
+  `successful_models`/`total_models`, and `model_responses[]` (names providers — dropped).
+- The engine does **not** produce `code`, `priority` or `effort`. The dashboard renders those only
+  if the stored data ever carries them; nothing is invented to fill the gap.
+
+## What changed
+| File | Change |
+|---|---|
+| `tools/asp_consensus.py` | `normalize` (web/tls/template reports → one finding shape + the engine subset, recorded by id) and `enrich` (positional pairing with a count check, allow-listed fields, vendor and tool names stripped, `consensus.status` = success / unavailable / not_required). Pattern copied from ICIT-DNSGuard `tools/enrich.py` + `dnsguard/consensus.py`. |
+| 6 scan workflows | scan job → `Normalize findings` + artifact; new `ai-consensus` job (`uses: IronCityIT/consensus-engine/.github/workflows/analyze.yml@main`, `secrets: inherit`); new `store` job (`needs` both, `if: always() && scan succeeded`). Old raw-report POST removed (it stored scanner JSON verbatim, tool names included). zap-api-scan and zap-auth-scan never stored anything before; they do now. |
+| Workflow names | `run-name` added; no client-facing workflow/job name says ZAP/Nuclei/Metasploit. File names unchanged, so dispatch callers are unaffected. |
+| `public/index.html` | Per-finding AI remediation rendered from `ai_analysis`. `remediationDB` and `defaultRemediation` deleted; no analysis → "AI analysis unavailable for this finding" + the scanner's own solution. Static "10-model" banner with vendor names replaced by real counts (hidden when none). All stored text via `textContent` (closed a stored XSS through `innerHTML` and inline `onclick`). Fabricated demo findings replaced by an empty state. CSV export neutralises formula injection. |
+| `functions/record.js` + test | Record building extracted and tested (`npm test`): per-finding analysis persists, `consensus.status` persists, vendor keys stripped server-side. |
+| `.github/workflows/consensus-tests.yml` | PR gate: ruff format/lint, mypy strict, pytest, node test. |
+
+## Blockers found (not fixable from this branch)
+1. **GitHub Actions is disabled on this repo** (`actions/permissions.enabled=false`); dispatches
+   queue forever with 0 jobs. Branch dispatch proof (step 6) cannot run until it is re-enabled.
+2. **No `FIREBASE_SERVICE_ACCOUNT`** on the repo, no Firebase CLI / ADC / gcloud account on the
+   devbox. Also: this repo is REVIEW-ONLY — merge and deploy are Bill's.
+3. **The deployed `storeScanResults` is not this source.** Live docs in the flat `scans`
+   collection have the old shape (`tool`, `source`, no `client_id`, no `consensus`). Until
+   `functions/` is deployed, consensus data is not persisted per finding.
+4. **The dashboard has no sign-in.** It reads the legacy flat `scans` collection, which is
+   world-readable today (unauthenticated GET = 200). `main`'s function writes
+   `clients/{client_id}/scans/{scan_id}` and `main`'s rules require an Auth0-derived `client_id`
+   claim to read it. Showing newly stored scans on the live dashboard therefore needs the Auth0 →
+   Firebase custom-token work (on the NAS/auth branch chain, excluded from this mission) or a
+   decision to keep the legacy collection. Not decided here.

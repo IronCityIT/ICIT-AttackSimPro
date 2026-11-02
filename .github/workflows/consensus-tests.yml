@@ -1,0 +1,50 @@
+name: AttackSim Pro - Consensus Tests
+
+# Gate for the scan -> AI consensus -> store hand-off: the normalizer/enricher
+# (tools/asp_consensus.py) and the storeScanResults record contract.
+on:
+  pull_request:
+    paths:
+      - 'tools/**'
+      - 'tests/**'
+      - 'functions/**'
+      - 'ruff.toml'
+      - '.github/workflows/consensus-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Normalizer and enricher
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test tools
+        run: pip install --quiet pytest ruff mypy
+      - name: Format
+        run: ruff format --check tools tests
+      - name: Lint
+        run: ruff check tools tests
+      - name: Typecheck
+        run: mypy --ignore-missing-imports --strict tools/asp_consensus.py
+      - name: Tests
+        run: python -m pytest -q tests
+
+  functions:
+    name: storeScanResults record contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Tests
+        working-directory: functions
+        run: npm test
