@@ -6,7 +6,7 @@
 # ⚠️  Unauthorized use is illegal and unethical
 # ============================================================================
 
-name: "AttackSimPro - Metasploit Exploitation"
+name: "AttackSim Pro - Controlled Exploitation Validation"
 
 on:
   workflow_dispatch:

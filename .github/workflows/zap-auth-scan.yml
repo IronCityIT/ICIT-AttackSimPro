@@ -1,4 +1,5 @@
-name: AttackSimPro - ZAP Authenticated Scan
+name: AttackSim Pro - Authenticated Web Scan
+run-name: "AttackSim Pro - Authenticated Web Scan · ${{ inputs.scan_id }}"
 
 # ============================================================
 # AUTHENTICATED SCAN - Scan pages behind login
@@ -51,7 +52,14 @@ permissions:
 
 jobs:
   auth_scan:
-    name: ZAP Authenticated Security Scan
+    name: Authenticated Web Scan
+    # Validated identifiers and the engine's input, for the jobs below.
+    outputs:
+      scan_id: ${{ steps.norm.outputs.scan_id }}
+      client_id: ${{ steps.norm.outputs.client_id }}
+      target: ${{ steps.norm.outputs.target }}
+      findings_b64: ${{ steps.norm.outputs.findings_b64 }}
+      has_findings: ${{ steps.norm.outputs.has_findings }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     
@@ -389,3 +397,121 @@ jobs:
           echo "🔐 Authenticated scanning tests logged-in user paths"
           echo "   including session management and access controls."
           echo ""
+
+      # Hand-off to the shared AI engine and the store job. One normalized
+      # finding list is stored; the actionable subset is what the engine is
+      # asked about, recorded by id so the store job pairs answers against the
+      # same list (tools/asp_consensus.py). Inputs arrive via env only.
+      - name: Normalize findings
+        id: norm
+        env:
+          SCAN_ID: ${{ inputs.scan_id }}
+          CLIENT_ID: ${{ inputs.client_id }}
+          TARGET_URL: ${{ inputs.target_url }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$SCAN_ID" | grep -qE '^[A-Za-z0-9._-]{1,100}$'; then
+            echo "::error::scan_id must be 1-100 characters of [A-Za-z0-9._-]"; exit 1
+          fi
+          CID=$(printf '%s' "${CLIENT_ID:-internal}" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9\n' '-' \
+                | sed 's/-\+/-/g; s/^-//; s/-$//')
+          if [ -z "$CID" ]; then echo "::error::client_id does not yield a usable identifier"; exit 1; fi
+          mkdir -p asp-out
+          REPORT="$(find zap-reports -maxdepth 1 -name "zap-auth-${SCAN_ID}*.json" 2>/dev/null | head -1 || true)"
+          python3 tools/asp_consensus.py normalize --kind web --input "${REPORT:-missing}" \
+            --target "$TARGET_URL" -o asp-out/asp-findings.json --engine-out asp-out/engine-findings.json
+          [ "$(head -c 1 asp-out/asp-findings.json)" = "{" ] || { echo "::error::findings bundle is not a JSON object"; exit 1; }
+          [ "$(head -c 1 asp-out/engine-findings.json)" = "[" ] || { echo "::error::engine input is not a JSON array"; exit 1; }
+          SENT=$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' asp-out/engine-findings.json)
+          {
+            echo "scan_id=$SCAN_ID"
+            echo "client_id=$CID"
+            echo "target=$TARGET_URL"
+            echo "findings_b64=$(base64 -w0 < asp-out/engine-findings.json)"
+            if [ "$SENT" -gt 0 ]; then echo "has_findings=true"; else echo "has_findings=false"; fi
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload normalized findings
+        uses: actions/upload-artifact@v4
+        with:
+          name: asp-findings-${{ steps.norm.outputs.scan_id }}
+          path: asp-out/asp-findings.json
+          retention-days: 90
+          if-no-files-found: error
+
+  # AI analysis is delegated to the shared engine and never re-implemented here
+  # (IronCityIT/consensus-engine, workflow_call contract on main).
+  ai-consensus:
+    name: AI Consensus Analysis
+    needs: auth_scan
+    if: needs.auth_scan.outputs.has_findings == 'true'
+    uses: IronCityIT/consensus-engine/.github/workflows/analyze.yml@main
+    with:
+      findings_json: ${{ needs.auth_scan.outputs.findings_b64 }}
+      scan_id: ${{ needs.auth_scan.outputs.scan_id }}
+      client_id: ${{ needs.auth_scan.outputs.client_id }}
+      product: attacksim-pro
+    secrets: inherit
+
+  # Runs whether or not the analysis succeeded: a scan without AI enrichment is
+  # still stored, with consensus.status saying so - never with a made-up verdict.
+  store:
+    name: Store Results
+    needs: [auth_scan, ai-consensus]
+    if: always() && needs.auth_scan.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Checkout FIRST: its default clean would delete artifacts downloaded before it.
+      - uses: actions/checkout@v4
+
+      - name: Download normalized findings
+        uses: actions/download-artifact@v4
+        with:
+          name: asp-findings-${{ needs.auth_scan.outputs.scan_id }}
+          path: incoming
+
+      # The analysis arrives as a FILE (the engine's result artifact), never via
+      # an environment variable: it runs to hundreds of kilobytes, and passing
+      # consensus_b64 through env died with "Argument list too long" in DNS Guard.
+      - name: Download the AI analysis
+        if: needs.ai-consensus.result == 'success'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: consensus-result-${{ needs.auth_scan.outputs.scan_id }}
+          path: consensus
+
+      - name: Build storeScanResults payload
+        env:
+          SCAN_ID: ${{ needs.auth_scan.outputs.scan_id }}
+          CLIENT_ID: ${{ needs.auth_scan.outputs.client_id }}
+          TARGET: ${{ needs.auth_scan.outputs.target }}
+          CONSENSUS_RESULT: ${{ needs.ai-consensus.result }}
+        run: |
+          set -euo pipefail
+          python3 tools/asp_consensus.py enrich \
+            --bundle incoming/asp-findings.json --consensus-dir consensus \
+            --job-result "$CONSENSUS_RESULT" --scan-id "$SCAN_ID" --client-id "$CLIENT_ID" \
+            --scan-type authenticated-web --target "$TARGET" \
+            --timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o payload.json
+          [ "$(head -c 1 payload.json)" = "{" ] || { echo "::error::payload.json does not start with {"; exit 1; }
+          [ "$(tail -c 2 payload.json | head -c 1)" = "}" ] || { echo "::error::payload.json does not end with }"; exit 1; }
+          python3 -m json.tool payload.json > /dev/null
+          echo "payload.json is valid JSON ($(wc -c < payload.json) bytes)"
+
+      - name: POST to storeScanResults
+        env:
+          STORE_URL_SECRET: ${{ secrets.STORE_SCAN_RESULTS_URL }}
+          STORE_URL_DEFAULT: https://storescanresults-wrl6y3keaa-ul.a.run.app
+        run: |
+          set -euo pipefail
+          STORE_URL="${STORE_URL_SECRET:-$STORE_URL_DEFAULT}"
+          HTTP_CODE=$(curl -sS -o response.txt -w '%{http_code}' -X POST "$STORE_URL" \
+            -H "Content-Type: application/json" --data @payload.json)
+          echo "storeScanResults responded HTTP $HTTP_CODE"
+          cat response.txt || true
+          case "$HTTP_CODE" in
+            2*) echo "Results stored" ;;
+            *)  echo "::error::store POST rejected (HTTP $HTTP_CODE)"; exit 1 ;;
+          esac

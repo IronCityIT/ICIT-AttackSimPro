@@ -1,4 +1,5 @@
-name: AttackSimPro - TLS & Headers Evidence
+name: AttackSim Pro - TLS & Security Headers
+run-name: "AttackSim Pro - TLS & Security Headers · ${{ inputs.scan_id }}"
 
 # ============================================================
 # TLS & HEADERS SCAN - Collect SSL/TLS config and security headers
@@ -34,6 +35,13 @@ concurrency:
 jobs:
   tls_headers:
     name: TLS & Security Headers Check
+    # Validated identifiers and the engine's input, for the jobs below.
+    outputs:
+      scan_id: ${{ steps.norm.outputs.scan_id }}
+      client_id: ${{ steps.norm.outputs.client_id }}
+      target: ${{ steps.norm.outputs.target }}
+      findings_b64: ${{ steps.norm.outputs.findings_b64 }}
+      has_findings: ${{ steps.norm.outputs.has_findings }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -385,32 +393,120 @@ jobs:
           echo "📁 Reports available in workflow artifacts"
           echo ""
 
-      - name: Post results to AttackSimPro Dashboard
-        if: always()
+      # Hand-off to the shared AI engine and the store job. One normalized
+      # finding list is stored; the actionable subset is what the engine is
+      # asked about, recorded by id so the store job pairs answers against the
+      # same list (tools/asp_consensus.py). Inputs arrive via env only.
+      - name: Normalize findings
+        id: norm
         env:
-          STORE_SCAN_RESULTS_URL: ${{ secrets.STORE_SCAN_RESULTS_URL }}
+          SCAN_ID: ${{ inputs.scan_id }}
+          CLIENT_ID: ${{ inputs.client_id }}
+          TARGET_URL: ${{ inputs.target_url }}
         run: |
-          JSON_FILE="tls-reports/report-${{ github.event.inputs.scan_id }}.json"
-          
-          if [ -f "$JSON_FILE" ]; then
-            # Post the full TLS/Headers JSON report
-            curl -X POST "${STORE_SCAN_RESULTS_URL:-https://storescanresults-wrl6y3keaa-ul.a.run.app}" \
-              -H "Content-Type: application/json" \
-              -d @"$JSON_FILE" || { echo "::error::Failed to post scan results to the dashboard"; exit 1; }
-          else
-            # Fallback to summary
-            curl -X POST "${STORE_SCAN_RESULTS_URL:-https://storescanresults-wrl6y3keaa-ul.a.run.app}" \
-              -H "Content-Type: application/json" \
-              -d '{
-                "scan_id": "${{ github.event.inputs.scan_id }}",
-                "scan_type": "tls-headers",
-                "target_url": "${{ github.event.inputs.target_url }}",
-                "client_id": "${{ github.event.inputs.client_id }}",
-                "summary": {
-                  "tls_issues": ${{ steps.tls_check.outputs.tls_issues || 0 }},
-                  "headers_present": ${{ steps.headers_check.outputs.headers_present || 0 }},
-                  "headers_missing": ${{ steps.headers_check.outputs.headers_missing || 0 }},
-                  "cert_days_left": "${{ steps.tls_check.outputs.days_left }}"
-                }
-              }' || { echo "::error::Failed to post scan results to the dashboard"; exit 1; }
+          set -euo pipefail
+          if ! printf '%s' "$SCAN_ID" | grep -qE '^[A-Za-z0-9._-]{1,100}$'; then
+            echo "::error::scan_id must be 1-100 characters of [A-Za-z0-9._-]"; exit 1
           fi
+          CID=$(printf '%s' "${CLIENT_ID:-internal}" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9\n' '-' \
+                | sed 's/-\+/-/g; s/^-//; s/-$//')
+          if [ -z "$CID" ]; then echo "::error::client_id does not yield a usable identifier"; exit 1; fi
+          mkdir -p asp-out
+          REPORT="tls-reports/report-${SCAN_ID}.json"
+          python3 tools/asp_consensus.py normalize --kind tls --input "${REPORT:-missing}" \
+            --target "$TARGET_URL" -o asp-out/asp-findings.json --engine-out asp-out/engine-findings.json
+          [ "$(head -c 1 asp-out/asp-findings.json)" = "{" ] || { echo "::error::findings bundle is not a JSON object"; exit 1; }
+          [ "$(head -c 1 asp-out/engine-findings.json)" = "[" ] || { echo "::error::engine input is not a JSON array"; exit 1; }
+          SENT=$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' asp-out/engine-findings.json)
+          {
+            echo "scan_id=$SCAN_ID"
+            echo "client_id=$CID"
+            echo "target=$TARGET_URL"
+            echo "findings_b64=$(base64 -w0 < asp-out/engine-findings.json)"
+            if [ "$SENT" -gt 0 ]; then echo "has_findings=true"; else echo "has_findings=false"; fi
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload normalized findings
+        uses: actions/upload-artifact@v4
+        with:
+          name: asp-findings-${{ steps.norm.outputs.scan_id }}
+          path: asp-out/asp-findings.json
+          retention-days: 90
+          if-no-files-found: error
+
+  # AI analysis is delegated to the shared engine and never re-implemented here
+  # (IronCityIT/consensus-engine, workflow_call contract on main).
+  ai-consensus:
+    name: AI Consensus Analysis
+    needs: tls_headers
+    if: needs.tls_headers.outputs.has_findings == 'true'
+    uses: IronCityIT/consensus-engine/.github/workflows/analyze.yml@main
+    with:
+      findings_json: ${{ needs.tls_headers.outputs.findings_b64 }}
+      scan_id: ${{ needs.tls_headers.outputs.scan_id }}
+      client_id: ${{ needs.tls_headers.outputs.client_id }}
+      product: attacksim-pro
+    secrets: inherit
+
+  # Runs whether or not the analysis succeeded: a scan without AI enrichment is
+  # still stored, with consensus.status saying so - never with a made-up verdict.
+  store:
+    name: Store Results
+    needs: [tls_headers, ai-consensus]
+    if: always() && needs.tls_headers.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Checkout FIRST: its default clean would delete artifacts downloaded before it.
+      - uses: actions/checkout@v4
+
+      - name: Download normalized findings
+        uses: actions/download-artifact@v4
+        with:
+          name: asp-findings-${{ needs.tls_headers.outputs.scan_id }}
+          path: incoming
+
+      # The analysis arrives as a FILE (the engine's result artifact), never via
+      # an environment variable: it runs to hundreds of kilobytes, and passing
+      # consensus_b64 through env died with "Argument list too long" in DNS Guard.
+      - name: Download the AI analysis
+        if: needs.ai-consensus.result == 'success'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: consensus-result-${{ needs.tls_headers.outputs.scan_id }}
+          path: consensus
+
+      - name: Build storeScanResults payload
+        env:
+          SCAN_ID: ${{ needs.tls_headers.outputs.scan_id }}
+          CLIENT_ID: ${{ needs.tls_headers.outputs.client_id }}
+          TARGET: ${{ needs.tls_headers.outputs.target }}
+          CONSENSUS_RESULT: ${{ needs.ai-consensus.result }}
+        run: |
+          set -euo pipefail
+          python3 tools/asp_consensus.py enrich \
+            --bundle incoming/asp-findings.json --consensus-dir consensus \
+            --job-result "$CONSENSUS_RESULT" --scan-id "$SCAN_ID" --client-id "$CLIENT_ID" \
+            --scan-type tls-headers --target "$TARGET" \
+            --timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o payload.json
+          [ "$(head -c 1 payload.json)" = "{" ] || { echo "::error::payload.json does not start with {"; exit 1; }
+          [ "$(tail -c 2 payload.json | head -c 1)" = "}" ] || { echo "::error::payload.json does not end with }"; exit 1; }
+          python3 -m json.tool payload.json > /dev/null
+          echo "payload.json is valid JSON ($(wc -c < payload.json) bytes)"
+
+      - name: POST to storeScanResults
+        env:
+          STORE_URL_SECRET: ${{ secrets.STORE_SCAN_RESULTS_URL }}
+          STORE_URL_DEFAULT: https://storescanresults-wrl6y3keaa-ul.a.run.app
+        run: |
+          set -euo pipefail
+          STORE_URL="${STORE_URL_SECRET:-$STORE_URL_DEFAULT}"
+          HTTP_CODE=$(curl -sS -o response.txt -w '%{http_code}' -X POST "$STORE_URL" \
+            -H "Content-Type: application/json" --data @payload.json)
+          echo "storeScanResults responded HTTP $HTTP_CODE"
+          cat response.txt || true
+          case "$HTTP_CODE" in
+            2*) echo "Results stored" ;;
+            *)  echo "::error::store POST rejected (HTTP $HTTP_CODE)"; exit 1 ;;
+          esac
