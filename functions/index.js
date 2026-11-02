@@ -30,19 +30,12 @@ const logger = require("firebase-functions/logger");
 const { initializeApp, getApps } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 
+const { buildRecord } = require("./record");
+
 if (!getApps().length) initializeApp();
 const db = getFirestore();
 
 const REGION = "us-east5";
-
-/** Normalize a client name into a stable, path-safe client_id slug. */
-function toClientId(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
 
 exports.storeScanResults = onRequest(
   { region: REGION, cors: false },
@@ -53,35 +46,16 @@ exports.storeScanResults = onRequest(
     }
 
     const body = req.body || {};
-    const clientId = toClientId(body.client_id || body.client_name);
-    const scanId = String(body.scan_id || "").trim();
-
-    // Both are required. The deployed function defaulted them away, which is how
-    // an unattributable scan came to look like a successful one.
-    if (!clientId) {
-      res.status(400).json({ error: "client_id (or client_name) is required" });
+    // Validation and the stored shape live in record.js, where they are tested.
+    // Per-finding AI analysis is carried inside findings[]; the scan-level
+    // outcome (success / unavailable / not_required) in consensus.
+    const built = buildRecord(body);
+    if (built.error) {
+      res.status(400).json({ error: built.error });
       return;
     }
-    if (!scanId) {
-      res.status(400).json({ error: "scan_id is required" });
-      return;
-    }
-
-    const record = {
-      client_id: clientId,
-      client_name: body.client_name || null,
-      scan_id: scanId,
-      scan_type: body.scan_type || "unknown",
-      // The target the caller actually scanned. The deployed function wrote the
-      // literal "Multiple targets" here regardless of what was sent.
-      target: body.target || body.target_url || null,
-      status: body.status || "completed",
-      summary: body.summary || {},
-      findings: Array.isArray(body.findings) ? body.findings : [],
-      consensus: body.consensus || null,
-      error: body.error || null,
-      created_at: FieldValue.serverTimestamp(),
-    };
+    const { clientId, scanId } = built;
+    const record = { ...built.record, created_at: FieldValue.serverTimestamp() };
 
     try {
       const ref = db
